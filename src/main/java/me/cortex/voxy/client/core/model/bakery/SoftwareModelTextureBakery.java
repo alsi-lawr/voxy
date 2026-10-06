@@ -38,8 +38,7 @@ import static org.lwjgl.opengl.GL11C.GL_RGBA;
 import static org.lwjgl.opengl.GL12.GL_PACK_IMAGE_HEIGHT;
 import static org.lwjgl.opengl.GL15C.glBindBuffer;
 import static org.lwjgl.opengl.GL21.GL_PIXEL_PACK_BUFFER;
-import static org.lwjgl.opengl.GL30C.GL_FRAMEBUFFER;
-import static org.lwjgl.opengl.GL30C.glBindFramebuffer;
+import static org.lwjgl.opengl.GL21.GL_PIXEL_PACK_BUFFER_BINDING;
 
 public class SoftwareModelTextureBakery {
     //Note: the first bit of metadata is if alpha discard is enabled
@@ -65,14 +64,28 @@ public class SoftwareModelTextureBakery {
 
         glFlush();
         glFinish();
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-        glPixelStorei(GL_PACK_ROW_LENGTH, width);
-        glPixelStorei(GL_PACK_IMAGE_HEIGHT, 0);
-        glPixelStorei(GL_PACK_SKIP_ROWS, 0);
-        glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
-        glPixelStorei(GL_PACK_ALIGNMENT, 4);
-        glGetTextureImage(tex.getId(), 0, GL_RGBA, GL_UNSIGNED_BYTE, texture);
+        int packBuffer = glGetInteger(GL_PIXEL_PACK_BUFFER_BINDING);
+        int rowLength = glGetInteger(GL_PACK_ROW_LENGTH);
+        int imageHeight = glGetInteger(GL_PACK_IMAGE_HEIGHT);
+        int skipRows = glGetInteger(GL_PACK_SKIP_ROWS);
+        int skipPixels = glGetInteger(GL_PACK_SKIP_PIXELS);
+        int alignment = glGetInteger(GL_PACK_ALIGNMENT);
+        try {
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+            glPixelStorei(GL_PACK_ROW_LENGTH, width);
+            glPixelStorei(GL_PACK_IMAGE_HEIGHT, 0);
+            glPixelStorei(GL_PACK_SKIP_ROWS, 0);
+            glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
+            glPixelStorei(GL_PACK_ALIGNMENT, 4);
+            glGetTextureImage(tex.getId(), 0, GL_RGBA, GL_UNSIGNED_BYTE, texture);
+        } finally {
+            glPixelStorei(GL_PACK_ROW_LENGTH, rowLength);
+            glPixelStorei(GL_PACK_IMAGE_HEIGHT, imageHeight);
+            glPixelStorei(GL_PACK_SKIP_ROWS, skipRows);
+            glPixelStorei(GL_PACK_SKIP_PIXELS, skipPixels);
+            glPixelStorei(GL_PACK_ALIGNMENT, alignment);
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, packBuffer);
+        }
         this.rasterizer.setSamplerTexture(texture, width, height);
     }
 
