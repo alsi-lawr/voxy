@@ -14,7 +14,7 @@ import java.util.Map;
 @Mixin(value = ShaderPack.class, remap = false)
 public class MixinShaderPackPrototype {
     @ModifyVariable(method = "<init>(Ljava/nio/file/Path;Ljava/util/Map;Lcom/google/common/collect/ImmutableList;)V", at = @At("HEAD"), argsOnly = true)
-    private ImmutableList<StringPair> voxy$prototypeEnvironment(ImmutableList<StringPair> environment, Path root, Map<String, String> options, ImmutableList<StringPair> ignored) {
+    private static ImmutableList<StringPair> voxy$prototypeEnvironment(ImmutableList<StringPair> environment, Path root, Map<String, String> options, ImmutableList<StringPair> ignored) {
         return DhPrototype.environment(root, options, environment);
     }
 }
