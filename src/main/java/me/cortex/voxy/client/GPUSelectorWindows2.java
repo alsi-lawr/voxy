@@ -5,7 +5,8 @@ import org.lwjgl.system.JNI;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.system.windows.GDI32;
-import org.lwjgl.system.windows.Kernel32;
+import org.lwjgl.system.APIUtil;
+import org.lwjgl.system.SharedLibrary;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -13,13 +14,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
-import static org.lwjgl.system.APIUtil.apiGetFunctionAddressOptional;
 
 public class GPUSelectorWindows2 {
-    private static final long D3DKMTSetProperties = apiGetFunctionAddressOptional(GDI32.getLibrary(), "D3DKMTSetProperties");
-    private static final long D3DKMTEnumAdapters2 = apiGetFunctionAddressOptional(GDI32.getLibrary(), "D3DKMTEnumAdapters2");
-    private static final long D3DKMTCloseAdapter = apiGetFunctionAddressOptional(GDI32.getLibrary(), "D3DKMTCloseAdapter");
-    private static final long D3DKMTQueryAdapterInfo = apiGetFunctionAddressOptional(GDI32.getLibrary(), "D3DKMTQueryAdapterInfo");
+    private static final long D3DKMTSetProperties = GDI32.getLibrary().getFunctionAddress("D3DKMTSetProperties");
+    private static final long D3DKMTEnumAdapters2 = GDI32.getLibrary().getFunctionAddress("D3DKMTEnumAdapters2");
+    private static final long D3DKMTCloseAdapter = GDI32.getLibrary().getFunctionAddress("D3DKMTCloseAdapter");
+    private static final long D3DKMTQueryAdapterInfo = GDI32.getLibrary().getFunctionAddress("D3DKMTQueryAdapterInfo");
 
     private static int setPCIProperties(int type, int vendor, int device, int subSys) {
         try (var stack = MemoryStack.stackPush()) {
@@ -208,9 +208,10 @@ public class GPUSelectorWindows2 {
         return stub;
     }
 
-    private static final long D3DKMTOpenAdapterFromLuid = apiGetFunctionAddressOptional(GDI32.getLibrary(), "D3DKMTOpenAdapterFromLuid");
-    private static final long D3DKMTOpenAdapterFromHdc = apiGetFunctionAddressOptional(GDI32.getLibrary(), "D3DKMTOpenAdapterFromHdc");
-    private static final long VirtualProtect = apiGetFunctionAddressOptional(Kernel32.getLibrary(), "VirtualProtect");
+    private static final long D3DKMTOpenAdapterFromLuid = GDI32.getLibrary().getFunctionAddress("D3DKMTOpenAdapterFromLuid");
+    private static final long D3DKMTOpenAdapterFromHdc = GDI32.getLibrary().getFunctionAddress("D3DKMTOpenAdapterFromHdc");
+    private static final SharedLibrary kernel32 = APIUtil.apiCreateLibrary("kernel32.dll");
+    private static final long VirtualProtect = kernel32.getFunctionAddress("VirtualProtect");
 
     private static byte[] toByteArray(int... array) {
         byte[] res = new byte[array.length];

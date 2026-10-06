@@ -56,6 +56,9 @@ public class Capabilities {
 
     public Capabilities() {
         var cap = GL.getCapabilities();
+        if (!cap.OpenGL46 || cap.glDispatchComputeIndirect == 0 || cap.glMultiDrawElementsIndirectCountARB == 0) {
+            throw new UnsupportedOperationException("Voxy requires OpenGL 4.6, indirect compute dispatch and ARB indirect-count drawing; no fallback renderer is available.");
+        }
         this.sparseBuffer = cap.GL_ARB_sparse_buffer;
         this.compute = cap.glDispatchComputeIndirect != 0;
         this.indirectParameters = cap.glMultiDrawElementsIndirectCountARB != 0;

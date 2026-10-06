@@ -6,6 +6,8 @@ import net.minecraft.core.Holder;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
+import net.minecraft.util.profiling.ProfilerFiller;
+import java.util.function.Supplier;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.storage.WritableLevelData;
 import org.spongepowered.asm.mixin.Mixin;
@@ -24,6 +26,7 @@ public class MixinWorld implements IWorldGetIdentifier {
                                        ResourceKey<Level> key,
                                        RegistryAccess registryManager,
                                        Holder<DimensionType> dimensionEntry,
+                                       Supplier<ProfilerFiller> profiler,
                                        boolean isClient,
                                        boolean debugWorld,
                                        long seed,

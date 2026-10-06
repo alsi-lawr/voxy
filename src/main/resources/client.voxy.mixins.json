@@ -1,10 +1,9 @@
 {
   "required": true,
+  "plugin": "me.cortex.voxy.commonImpl.mixin.OptionalMixinPlugin",
   "package": "me.cortex.voxy.client.mixin",
   "compatibilityLevel": "JAVA_17",
   "client": [
-    "flashback.MixinFlashbackMeta",
-    "flashback.MixinFlashbackRecorder",
     "iris.CustomUniformsAccessor",
     "iris.IrisRenderingPipelineAccessor",
     "iris.MixinIris",
@@ -19,6 +18,7 @@
     "minecraft.MixinClientLevel",
     "minecraft.MixinDebugScreenEntryList",
     "minecraft.MixinFogRenderer",
+    "minecraft.MixinGameRenderer",
     "minecraft.MixinLevelExtractor",
     "minecraft.MixinLevelRenderer",
     "minecraft.MixinRenderSystem",
@@ -33,10 +33,9 @@
     "sodium.AccessorSodiumWorldRenderer",
     "sodium.MixinChunkJobQueue",
     "sodium.MixinDefaultChunkRenderer",
-    "sodium.MixinFallbackVisibleChunkCollector",
-    "sodium.MixinRenderRegionManager",
     "sodium.MixinRenderSectionManager",
     "sodium.MixinSodiumWorldRenderer",
+    "sodium.MixinSodiumOptionsGUI",
     "sodium.MixinVisibleChunkCollector"
   ],
   "injectors": {

@@ -79,8 +79,8 @@ public class SoftwareRasterizer {
     }
 
     private int sampleTexture(float u, float v) {
-        int pu = Math.clamp(Math.round(u*this.samplerWidth-0.5f), 0, this.samplerWidth-1);
-        int pv = Math.clamp(Math.round(v*this.samplerHeight-0.5f), 0, this.samplerHeight-1);
+        int pu = Math.max(0, Math.min(Math.round(u*this.samplerWidth-0.5f), this.samplerWidth-1));
+        int pv = Math.max(0, Math.min(Math.round(v*this.samplerHeight-0.5f), this.samplerHeight-1));
         return this.samplerTexture[this.samplerWidth*pv+pu];
     }
 

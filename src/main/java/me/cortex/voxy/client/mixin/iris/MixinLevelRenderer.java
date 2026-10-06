@@ -1,21 +1,17 @@
 package me.cortex.voxy.client.mixin.iris;
 
-import com.mojang.blaze3d.buffers.GpuBufferSlice;
-import com.mojang.blaze3d.resource.GraphicsResourceAllocator;
+import com.mojang.blaze3d.vertex.PoseStack;
 import me.cortex.voxy.client.core.IVoxyRenderSystemHolder;
+import me.cortex.voxy.client.core.rendering.FogParameters;
 import me.cortex.voxy.client.core.util.IrisUtil;
-import net.caffeinemc.mods.sodium.client.render.chunk.ChunkRenderMatrices;
-import net.caffeinemc.mods.sodium.client.util.GameRendererStorage;
-import net.minecraft.client.DeltaTracker;
+import me.jellysquid.mods.sodium.client.render.chunk.ChunkRenderMatrices;
+import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.LevelRenderer;
-import net.minecraft.client.renderer.state.level.CameraRenderState;
-import org.joml.Matrix4fc;
-import org.joml.Vector4f;
-import org.spongepowered.asm.mixin.Final;
+import net.minecraft.client.renderer.LightTexture;
+import org.joml.Matrix4f;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -24,22 +20,17 @@ import static org.lwjgl.opengl.GL11C.glViewport;
 
 @Mixin(LevelRenderer.class)
 public class MixinLevelRenderer {
-
-    @Shadow
-    @Final
-    private GameRenderer gameRenderer;
-
-    @Inject(method = "render", at = @At("HEAD"), order = 100)
-    private void voxy$injectIrisCompat(GraphicsResourceAllocator resourceAllocator, DeltaTracker deltaTracker, boolean renderOutline, CameraRenderState cameraState, Matrix4fc modelViewMatrix, GpuBufferSlice terrainFog, Vector4f fogColor, boolean shouldRenderSky, CallbackInfo ci) {
-        if (IrisUtil.irisShaderPackEnabled()) {
-            var renderer = IVoxyRenderSystemHolder.getNullableHolder();
-            if (renderer != null) {
-                //Fixthe fucking viewport dims, fuck iris
-                glViewport(0,0, Minecraft.getInstance().gameRenderer.mainRenderTarget().width, Minecraft.getInstance().gameRenderer.mainRenderTarget().height);
-
-                var pos = cameraState.pos;
-                IrisUtil.CAPTURED_VIEWPORT_PARAMETERS = new IrisUtil.CapturedViewportParameters(new ChunkRenderMatrices(cameraState.projectionMatrix, cameraState.viewRotationMatrix), ((GameRendererStorage)this.gameRenderer).sodium$getFogParameters(), Minecraft.getInstance().gameRenderer.mainRenderTarget().width, Minecraft.getInstance().gameRenderer.mainRenderTarget().height, pos.x, pos.y, pos.z);
-            }
+    @Inject(method = "renderLevel", at = @At("HEAD"), order = 100)
+    private void voxy$captureViewport(PoseStack poseStack, float partialTick, long finishTimeNano,
+            boolean renderBlockOutline, Camera camera, GameRenderer gameRenderer,
+            LightTexture lightTexture, Matrix4f projection, CallbackInfo ci) {
+        if (IrisUtil.irisShaderPackEnabled() && IVoxyRenderSystemHolder.getNullableHolder() != null) {
+            var target = Minecraft.getInstance().getMainRenderTarget();
+            glViewport(0, 0, target.width, target.height);
+            var pos = camera.getPosition();
+            IrisUtil.CAPTURED_VIEWPORT_PARAMETERS = new IrisUtil.CapturedViewportParameters(
+                new ChunkRenderMatrices(projection, poseStack.last().pose()), FogParameters.current,
+                target.width, target.height, pos.x, pos.y, pos.z);
         }
     }
 }

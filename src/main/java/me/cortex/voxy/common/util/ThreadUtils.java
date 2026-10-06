@@ -2,7 +2,6 @@ package me.cortex.voxy.common.util;
 
 import me.cortex.voxy.common.Logger;
 import org.lwjgl.system.*;
-import org.lwjgl.system.windows.Kernel32;
 
 //Platform specific code to assist in thread utilities
 public class ThreadUtils {
@@ -12,13 +11,15 @@ public class ThreadUtils {
     public static final int WIN32_THREAD_MODE_BACKGROUND_END = 0x00020000;
     public static final boolean isWindows = Platform.get() == Platform.WINDOWS;
     public static final boolean isLinux = Platform.get() == Platform.LINUX;
+    private static final SharedLibrary kernel32 = isWindows ? APIUtil.apiCreateLibrary("kernel32.dll") : null;
+    private static final long GetCurrentThread = isWindows ? kernel32.getFunctionAddress("GetCurrentThread") : 0;
     private static final long SetThreadPriority;
     private static final long SetThreadSelectedCpuSetMasks;
     private static final long schedSetaffinity;
     static {
         if (isWindows) {
-            SetThreadPriority = Kernel32.getLibrary().getFunctionAddress("SetThreadPriority");
-            SetThreadSelectedCpuSetMasks = Kernel32.getLibrary().getFunctionAddress("SetThreadSelectedCpuSetMasks");
+            SetThreadPriority = kernel32.getFunctionAddress("SetThreadPriority");
+            SetThreadSelectedCpuSetMasks = kernel32.getFunctionAddress("SetThreadSelectedCpuSetMasks");
         } else {
             SetThreadPriority = 0;
             SetThreadSelectedCpuSetMasks = 0;
@@ -48,7 +49,7 @@ public class ThreadUtils {
         }
 
         if (masks == null) {
-            int retVal = JNI.invokePPCI(Kernel32.GetCurrentThread(), 0, (short) 0, SetThreadSelectedCpuSetMasks);
+            int retVal = JNI.invokePPI(JNI.invokeP(GetCurrentThread), 0L, (short) 0, SetThreadSelectedCpuSetMasks);
             if (retVal == 0) {
                 throw new IllegalStateException();
             }
@@ -66,7 +67,7 @@ public class ThreadUtils {
                 MemoryUtil.memPutShort(ptr+i*16L+8L, groups[i]);
             }
 
-            int retVal = JNI.invokePPCI(Kernel32.GetCurrentThread(), ptr, (short)masks.length, SetThreadSelectedCpuSetMasks);
+            int retVal = JNI.invokePPI(JNI.invokeP(GetCurrentThread), ptr, (short)masks.length, SetThreadSelectedCpuSetMasks);
             if (retVal == 0) {
                 throw new IllegalStateException();
             }
@@ -78,7 +79,7 @@ public class ThreadUtils {
         if (SetThreadPriority == 0 || !isWindows) {
             return false;
         }
-        if (JNI.callPI(Kernel32.GetCurrentThread(), priority, SetThreadPriority)==0) {
+        if (JNI.callPI(JNI.invokeP(GetCurrentThread), priority, SetThreadPriority)==0) {
             throw new IllegalStateException("Operation failed");
         }
         return true;

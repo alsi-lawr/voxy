@@ -33,7 +33,7 @@ public class VoxySamplers {
                     return 0;
                 }
                 return dt.id;
-            }, ()->GlSampler.MIPPED_NEAREST_NEAREST, opaqueNames);
+            }, ((IGetIrisVoxyPipelineData) pipeline).voxy$getDepthSampler(), opaqueNames);
 
             samplers.addDynamicSampler(TextureType.TEXTURE_2D, () -> {
                 var pipeData = ((IGetIrisVoxyPipelineData)pipeline).voxy$getPipelineData();
@@ -49,7 +49,7 @@ public class VoxySamplers {
                     return 0;
                 }
                 return dt.id;
-            }, ()->GlSampler.MIPPED_NEAREST_NEAREST, translucentNames);
+            }, ((IGetIrisVoxyPipelineData) pipeline).voxy$getDepthSampler(), translucentNames);
         }
     }
 }

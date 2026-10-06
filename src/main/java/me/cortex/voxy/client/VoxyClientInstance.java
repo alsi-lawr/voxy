@@ -1,6 +1,5 @@
 package me.cortex.voxy.client;
 
-import me.cortex.voxy.client.compat.FlashbackCompat;
 import me.cortex.voxy.client.config.VoxyConfig;
 import me.cortex.voxy.client.core.RenderResourceReuse;
 import me.cortex.voxy.client.mixin.sodium.AccessorSodiumWorldRenderer;
@@ -12,7 +11,7 @@ import me.cortex.voxy.common.config.section.SectionStorageConfig;
 import me.cortex.voxy.commonImpl.ImportManager;
 import me.cortex.voxy.commonImpl.VoxyInstance;
 import me.cortex.voxy.commonImpl.WorldIdentifier;
-import net.caffeinemc.mods.sodium.client.render.SodiumWorldRenderer;
+import me.jellysquid.mods.sodium.client.render.SodiumWorldRenderer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.level.storage.LevelResource;
 
@@ -21,25 +20,22 @@ import java.nio.file.Path;
 public class VoxyClientInstance extends VoxyInstance {
     private final Config config;
     private final Path basePath;
-    private final boolean noIngestOverride;
 
     public VoxyClientInstance() {
-        {
-            var path = FlashbackCompat.getReplayStoragePath();
-            this.noIngestOverride = path != null;
-            if (path == null) {
-                path = getBasePath();
-            }
-            var basePath = this.basePath = path.normalize();
-            this.config = StorageConfigUtil.getCreateStorageConfig(Config.class, c->c.version==1&&c.sectionStorageConfig!=null, ()->DEFAULT_STORAGE_CONFIG, basePath);
-        }
-        super();
-        this.updateDedicatedThreads();
+        this(getBasePath().normalize());
     }
 
-    @Override
-    protected boolean shouldCreateInstance() {
-        return !this.config.disabled;
+    private VoxyClientInstance(Path basePath) {
+        this(basePath, StorageConfigUtil.getCreateStorageConfig(Config.class,
+                c -> c.version == 1 && c.sectionStorageConfig != null,
+                () -> DEFAULT_STORAGE_CONFIG, basePath));
+    }
+
+    private VoxyClientInstance(Path basePath, Config config) {
+        super(!config.disabled);
+        this.basePath = basePath;
+        this.config = config;
+        this.updateDedicatedThreads();
     }
 
     @Override
@@ -79,7 +75,7 @@ public class VoxyClientInstance extends VoxyInstance {
 
     @Override
     public boolean isIngestEnabled(WorldIdentifier worldId) {
-        return (!this.noIngestOverride) && VoxyConfig.CONFIG.ingestEnabled;
+        return VoxyConfig.CONFIG.ingestEnabled;
     }
 
     @Override
@@ -118,7 +114,7 @@ public class VoxyClientInstance extends VoxyInstance {
                     Logger.error("Server info null");
                     basePath = basePath.resolve("UNKNOWN");
                 } else {
-                    if (info.isRealm()) {
+                    if (Minecraft.getInstance().isConnectedToRealms()) {
                         basePath = basePath.resolve("realms");
                     } else {
                         basePath = basePath.resolve(info.ip.replace(":", "_"));

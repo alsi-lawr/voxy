@@ -1,5 +1,6 @@
 package me.cortex.voxy.common.world;
 
+import me.cortex.voxy.common.util.BitPacking;
 import it.unimi.dsi.fastutil.longs.Long2ShortOpenHashMap;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.util.MemoryBuffer;
@@ -20,15 +21,15 @@ public class SaveLoadSystem3 {
         int x = i&0x1F;
         int y = (i>>10)&0x1F;
         int z = (i>>5)&0x1F;
-        return Integer.expand(x,0b1001001001001)|Integer.expand(y,0b10010010010010)|Integer.expand(z,0b100100100100100);
+        return (int) (BitPacking.spreadMorton5(x) | BitPacking.spreadMorton5(y) << 1 | BitPacking.spreadMorton5(z) << 2);
 
         //zyxzyxzyxzyxzyx
     }
 
     public static int z2lin(int i) {
-        int x = Integer.compress(i, 0b1001001001001);
-        int y = Integer.compress(i, 0b10010010010010);
-        int z = Integer.compress(i, 0b100100100100100);
+        int x = BitPacking.compactMorton5(i);
+        int y = BitPacking.compactMorton5(i >>> 1);
+        int z = BitPacking.compactMorton5(i >>> 2);
         return x|(y<<10)|(z<<5);
     }
 

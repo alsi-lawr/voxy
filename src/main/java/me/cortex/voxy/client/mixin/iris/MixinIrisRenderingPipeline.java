@@ -22,6 +22,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class MixinIrisRenderingPipeline implements IGetVoxyPatchData, IGetIrisVoxyPipelineData {
     @Shadow @Final private CustomUniforms customUniforms;
     @Shadow private ShaderStorageBufferHolder shaderStorageBufferHolder;
+    @Unique private net.irisshaders.iris.gl.sampler.GlSampler voxy$depthSampler;
     @Unique IrisShaderPatch patchData;
     @Unique
     IrisVoxyRenderPipelineData pipeline;
@@ -40,7 +41,7 @@ public class MixinIrisRenderingPipeline implements IGetVoxyPatchData, IGetIrisVo
         }
     }
 
-    @Inject(method = "beginLevelRendering", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/opengl/GlStateManager;_activeTexture(I)V", shift = At.Shift.BEFORE), remap = false)
+    @Inject(method = "beginLevelRendering", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/systems/RenderSystem;activeTexture(I)V", ordinal = 0, shift = At.Shift.BEFORE, remap = false), remap = false)
     private void voxy$injectViewportSetup(CallbackInfo ci) {
         if (IrisUtil.CAPTURED_VIEWPORT_PARAMETERS != null) {
             var renderer = IVoxyRenderSystemHolder.getNullable();
@@ -49,6 +50,20 @@ public class MixinIrisRenderingPipeline implements IGetVoxyPatchData, IGetIrisVo
                 IrisUtil.CAPTURED_VIEWPORT_PARAMETERS = null;
                 IrisUtil.USED_IRIS_VIEWPORT = true;
             }
+        }
+    }
+
+    @Override
+    public net.irisshaders.iris.gl.sampler.GlSampler voxy$getDepthSampler() {
+        if (voxy$depthSampler == null) voxy$depthSampler = new net.irisshaders.iris.gl.sampler.GlSampler(false, true, false, false);
+        return voxy$depthSampler;
+    }
+
+    @Inject(method = "destroy", at = @At("HEAD"))
+    private void voxy$destroyDepthSampler(CallbackInfo ci) {
+        if (voxy$depthSampler != null) {
+            voxy$depthSampler.destroy();
+            voxy$depthSampler = null;
         }
     }
 

@@ -3,10 +3,7 @@ package me.cortex.voxy.client.core.model.bakery;
 
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import me.cortex.voxy.common.util.MemoryBuffer;
-import net.minecraft.client.model.geom.builders.UVPair;
-import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
-import net.minecraft.client.renderer.texture.MipmapStrategy;
-import net.minecraft.client.resources.model.geometry.BakedQuad;
+import net.minecraft.client.renderer.block.model.BakedQuad;
 import org.lwjgl.system.MemoryUtil;
 
 public final class ReuseVertexConsumer implements VertexConsumer {
@@ -39,13 +36,13 @@ public final class ReuseVertexConsumer implements VertexConsumer {
     }
 
     @Override
-    public ReuseVertexConsumer addVertex(float x, float y, float z) {
+    public ReuseVertexConsumer vertex(double x, double y, double z) {
         this.ensureCanPut();
         this.ptr += VERTEX_FORMAT_SIZE; this.count++; //Goto next vertex
         this.meta(this.defaultMeta|this.globalOrMetadata);
-        MemoryUtil.memPutFloat(this.ptr, x);
-        MemoryUtil.memPutFloat(this.ptr + 4, y);
-        MemoryUtil.memPutFloat(this.ptr + 8, z);
+        MemoryUtil.memPutFloat(this.ptr, (float) x);
+        MemoryUtil.memPutFloat(this.ptr + 4, (float) y);
+        MemoryUtil.memPutFloat(this.ptr + 8, (float) z);
         return this;
     }
 
@@ -56,64 +53,64 @@ public final class ReuseVertexConsumer implements VertexConsumer {
     }
 
     @Override
-    public ReuseVertexConsumer setColor(int red, int green, int blue, int alpha) {
+    public ReuseVertexConsumer color(int red, int green, int blue, int alpha) {
         return this;
     }
 
     @Override
-    public VertexConsumer setColor(int i) {
-        return this;
-    }
-
-    @Override
-    public ReuseVertexConsumer setUv(float u, float v) {
+    public ReuseVertexConsumer uv(float u, float v) {
         MemoryUtil.memPutFloat(this.ptr + 16, u);
         MemoryUtil.memPutFloat(this.ptr + 20, v);
         return this;
     }
 
     @Override
-    public ReuseVertexConsumer setUv1(int u, int v) {
+    public ReuseVertexConsumer overlayCoords(int u, int v) {
         return this;
     }
 
     @Override
-    public ReuseVertexConsumer setUv2(int u, int v) {
+    public ReuseVertexConsumer uv2(int u, int v) {
         return this;
     }
 
     @Override
-    public ReuseVertexConsumer setNormal(float x, float y, float z) {
+    public ReuseVertexConsumer normal(float x, float y, float z) {
         return this;
     }
 
-    @Override
-    public VertexConsumer setLineWidth(float f) {
-        return null;
-    }
+    @Override public void endVertex() {}
+    @Override public void defaultColor(int red, int green, int blue, int alpha) {}
+    @Override public void unsetDefaultColor() {}
 
-    public ReuseVertexConsumer quad(BakedQuad quad) {
-        return this.quad(quad, false);
-    }
-
-    public ReuseVertexConsumer quad(BakedQuad quad, boolean forceSolid) {
-        int meta = 0;
-        meta |= forceSolid?0:(quad.materialInfo().layer()!=ChunkSectionLayer.SOLID?1:0);//has discard
-        meta |= quad.materialInfo().isTinted()?4:0;//has tinting
-        return this.quad(quad, meta);
-    }
-
-    public ReuseVertexConsumer quad(BakedQuad quad, int metadata) {
-        this.anyShaded |= quad.materialInfo().shade();
-        this.anyDarkendTex |= quad.materialInfo().sprite().contents().mipmapStrategy == MipmapStrategy.DARK_CUTOUT;
+    public ReuseVertexConsumer quad(BakedQuad quad, boolean forceSolid, boolean hasDiscard) {
+        int meta = forceSolid ? 0 : hasDiscard ? 1 : 0;
+        meta |= quad.isTinted() ? 4 : 0;
+        this.anyShaded |= quad.isShade();
+        int[] vertices = quad.getVertices();
+        int stride = vertices.length / 4;
         this.ensureCanPut();
         for (int i = 0; i < 4; i++) {
-            var pos = quad.position(i);
-            this.addVertex(pos.x(), pos.y(), pos.z());
-            long puv = quad.packedUV(i);
-            this.setUv(UVPair.unpackU(puv),UVPair.unpackV(puv));
+            int offset = i * stride;
+            this.vertex(Float.intBitsToFloat(vertices[offset]), Float.intBitsToFloat(vertices[offset + 1]),
+                Float.intBitsToFloat(vertices[offset + 2]));
+            this.uv(Float.intBitsToFloat(vertices[offset + 4]), Float.intBitsToFloat(vertices[offset + 5]));
+            this.meta(meta | this.globalOrMetadata);
+        }
+        return this;
+    }
 
-            this.meta(metadata|this.globalOrMetadata);
+    public ReuseVertexConsumer quad(net.fabricmc.fabric.api.renderer.v1.mesh.QuadView quad,
+            boolean forceSolid, net.minecraft.client.renderer.RenderType layer) {
+        int meta = !forceSolid && layer != net.minecraft.client.renderer.RenderType.solid() ? 1 : 0;
+        meta |= quad.colorIndex() >= 0 && !quad.material().disableColorIndex() ? 4 : 0;
+        this.anyShaded |= !quad.material().disableDiffuse();
+        this.anyDarkendTex |= layer == net.minecraft.client.renderer.RenderType.cutoutMipped();
+        this.ensureCanPut();
+        for (int i = 0; i < 4; i++) {
+            this.vertex(quad.x(i), quad.y(i), quad.z(i));
+            this.uv(quad.u(i), quad.v(i));
+            this.meta(meta | this.globalOrMetadata);
         }
         return this;
     }

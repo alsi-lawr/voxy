@@ -1,12 +1,24 @@
 package me.cortex.voxy.client.core.model;
 
-import net.caffeinemc.mods.sodium.client.util.color.ColorSRGB;
-import net.minecraft.util.ARGB;
+import me.jellysquid.mods.sodium.client.util.color.ColorSRGB;
 
 import java.util.Arrays;
 
 //Texturing utils to manipulate data from the model bakery
 public class TextureUtils {
+    // Preserve the upstream ARGB helper's 10-bit quantization, unavailable in 1.20.1.
+    // The small table is built once, not during baking/rendering.
+    private static final byte[] LINEAR_ALPHA_TO_SRGB = new byte[1024];
+    static {
+        for (int i = 0; i < LINEAR_ALPHA_TO_SRGB.length; i++) {
+            float linear = i / 1023.0f;
+            float srgb = linear >= 0.0031308f
+                    ? (float) (1.055 * Math.pow(linear, 1.0 / 2.4) - 0.055)
+                    : 12.92f * linear;
+            LINEAR_ALPHA_TO_SRGB[i] = (byte) Math.round(srgb * 255.0f);
+        }
+    }
+
     //Returns the number of non pixels not written to
     public static int getWrittenPixelCount(ColourDepthTextureData texture, int checkMode) {
         int count = 0;
@@ -278,7 +290,7 @@ public class TextureUtils {
                 r / 4,
                 g / 4,
                 b / 4,
-                darkend ? ((int) a) / 4 : ARGB.linearToSrgbChannel(a / 4)
+                darkend ? ((int) a) / 4 : LINEAR_ALPHA_TO_SRGB[(int) (a / 4 * 1023.0f)] & 0xFF
         );
     }
 

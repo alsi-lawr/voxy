@@ -10,6 +10,7 @@
       shell = jdk: pkgs.mkShell {
         packages = [ jdk pkgs.git pkgs.pciutils ];
         JAVA_HOME = "${jdk}";
+        JAVA17_HOME = "${pkgs.jdk17}";
         LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
           pkgs.stdenv.cc.cc.lib
           pkgs.libGL
@@ -25,6 +26,7 @@
     in {
       devShells.${system} = {
         default = shell pkgs.jdk25;
+        build = shell pkgs.jdk21;
         upstream = shell pkgs.jdk25;
         target = shell pkgs.jdk17;
       };
