@@ -679,6 +679,13 @@ public class ModelFactory {
         } uploadPtr += 4;
 
 
+        if (me.cortex.voxy.client.core.util.IrisUtil.IRIS_INSTALLED && me.cortex.voxy.client.iris.DhPrototype.activeEnvironment()) {
+            for (int face = 0; face < 6; face++) {
+                MemoryUtil.memPutInt(uploadPtr + face * 4L, me.cortex.voxy.client.iris.DhPrototypeInputs.faceColour(textureData[face]));
+            }
+            MemoryUtil.memPutInt(uploadPtr + 24, me.cortex.voxy.client.iris.DhPrototypeInputs.material(blockState));
+        }
+
         //Note: if the layer isSolid then need to fill all the points in the texture where alpha == 0 with the average colour
         // of the surrounding blocks but only within the computed face size bounds
 

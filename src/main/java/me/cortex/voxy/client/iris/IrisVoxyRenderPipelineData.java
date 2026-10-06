@@ -43,6 +43,7 @@ import static org.lwjgl.opengl.GL43C.GL_SHADER_STORAGE_BUFFER;
 
 public class IrisVoxyRenderPipelineData {
     public IrisVoxyRenderPipeline thePipeline;
+    public final DhPrototype prototype;
     public final int[] opaqueDrawTargets;
     public final int[] translucentDrawTargets;
     private final String opaquePatch;
@@ -60,6 +61,7 @@ public class IrisVoxyRenderPipelineData {
     public final boolean useDynamicFarPlane;
 
     private IrisVoxyRenderPipelineData(IrisShaderPatch patch, int[] opaqueDrawTargets, int[] translucentDrawTargets, StructLayout uniformSet, Runnable blendingSetup, ImageSet imageSet, SSBOSet ssboSet) {
+        this.prototype = patch.prototype;
         this.opaqueDrawTargets = opaqueDrawTargets;
         this.translucentDrawTargets = translucentDrawTargets;
         this.opaquePatch = patch.getPatchOpaqueSource();
@@ -100,10 +102,11 @@ public class IrisVoxyRenderPipelineData {
 
 
     public static IrisVoxyRenderPipelineData buildPipeline(IrisRenderingPipeline ipipe, IrisShaderPatch patch, CustomUniforms cu, ShaderStorageBufferHolder ssboHolder) {
-        var uniforms = createUniformLayoutStructAndUpdater(createUniformSet(cu, patch));
+        var uniforms = patch.prototype == null ? createUniformLayoutStructAndUpdater(createUniformSet(cu, patch)) : null;
+        if (patch.prototype != null) patch.prototype.bindPipeline(ipipe, cu);
 
 
-        var imageSet = createImageSet(ipipe, patch);
+        var imageSet = patch.prototype == null ? createImageSet(ipipe, patch) : null;
 
         var ssboSet = createSSBOLayouts(patch.getSSBOs(), ssboHolder);
 

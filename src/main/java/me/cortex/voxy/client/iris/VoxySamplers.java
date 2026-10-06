@@ -6,6 +6,13 @@ import net.irisshaders.iris.gl.texture.TextureType;
 import net.irisshaders.iris.pipeline.IrisRenderingPipeline;
 
 public class VoxySamplers {
+    public static int prototypeDepth(IrisRenderingPipeline pipeline, boolean opaque) {
+        var data = ((IGetIrisVoxyPipelineData)pipeline).voxy$getPipelineData();
+        if (data == null || data.thePipeline == null) return 0;
+        var depth = opaque ? data.thePipeline.fb.getDepthTex() : data.thePipeline.fbTranslucent.getDepthTex();
+        return depth == null ? 0 : depth.id;
+    }
+
     public static void addSamplers(IrisRenderingPipeline pipeline, SamplerHolder samplers) {
         var patchData = ((IGetVoxyPatchData)pipeline).voxy$getPatchData();
         if (patchData != null) {

@@ -212,6 +212,7 @@ public class IrisShaderPatch {
 
 
 
+    public DhPrototype prototype;
     private final PatchGson patchData;
     private final ShaderPack pack;
     private final Int2ObjectMap<String> ssbos;
@@ -309,6 +310,22 @@ public class IrisShaderPatch {
                 }
             }
         };
+    }
+
+    public static IrisShaderPatch makePrototype(net.irisshaders.iris.shaderpack.programs.ProgramSet programs) {
+        if (!DhPrototype.activeEnvironment()) return null;
+        DhPrototype.requireNoDh();
+        var prototype = DhPrototype.from(programs);
+        var data = new PatchGson();
+        data.opaqueDrawBuffers = prototype.terrain.getDirectives().getDrawBuffers();
+        data.translucentDrawBuffers = prototype.water.getDirectives().getDrawBuffers();
+        data.uniforms = new String[0];
+        data.opaquePatchData = "";
+        data.translucentPatchData = "";
+        data.skipShaderDepthHackFix = true;
+        var patch = new IrisShaderPatch(data, programs.getPack());
+        patch.prototype = prototype;
+        return patch;
     }
 
     private static final Gson GSON = new GsonBuilder()

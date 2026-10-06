@@ -100,38 +100,48 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         this.pipeline = pipeline;
         //The pipeline can be used to transform the renderer in abstract ways
 
-        String vertex = ShaderLoader.parse("voxy:lod/gl46/quads3.vert");
-        String taa = pipeline.taaFunction("taaShift");
-        if (taa != null) {
-            vertex += "\n"+taa;//inject it at the end
+        var prototype = pipeline instanceof me.cortex.voxy.client.core.IrisVoxyRenderPipeline iris ? iris._getData().prototype : null;
+        if (prototype != null) {
+            var terrain = prototype.stages(false);
+            var water = prototype.stages(true);
+            long compileStart = System.nanoTime();
+            this.terrainShader = Shader.make().addSource(ShaderType.VERTEX, terrain.vertex()).addSource(ShaderType.FRAGMENT, terrain.fragment()).compile();
+            this.translucentTerrainShader = Shader.make().addSource(ShaderType.VERTEX, water.vertex()).addSource(ShaderType.FRAGMENT, water.fragment()).compile();
+            prototype.attach(this.terrainShader.id(), this.translucentTerrainShader.id(), System.nanoTime() - compileStart);
+        } else {
+            String vertex = ShaderLoader.parse("voxy:lod/gl46/quads3.vert");
+            String taa = pipeline.taaFunction("taaShift");
+            if (taa != null) {
+                vertex += "\n"+taa;//inject it at the end
+            }
+            var builder = Shader.make()
+                    .apply(this.properties::apply)
+                    .defineIf("TAA_PATCH", taa != null)
+                    .defineIf("DEBUG_RENDER", false)
+
+                    //.defineIf("USE_NV_JANK", Capabilities.INSTANCE.isNvidia)//TODO: fix use capability to try compile the jank thing to see if it can be and use that
+
+                    //.defineIf("USE_NV_BARRY", Capabilities.INSTANCE.nvBarryCoords)
+
+                    .addSource(ShaderType.VERTEX, vertex);
+
+            //Apply per face tinting
+            addDirectionalFaceTint(builder, Minecraft.getInstance().level);
+
+            String frag = ShaderLoader.parse("voxy:lod/gl46/quads.frag");
+
+            String opaqueFrag = pipeline.patchOpaqueShader(this, frag);
+            opaqueFrag = opaqueFrag==null?frag:opaqueFrag;
+
+            //TODO: find a more robust/nicer way todo this
+            this.terrainShader = tryCompilePatchedOrNormal(builder, opaqueFrag, frag);
+
+            String translucentFrag = pipeline.patchTranslucentShader(this, frag);
+            translucentFrag = translucentFrag==null?frag:translucentFrag;
+
+            this.translucentTerrainShader = tryCompilePatchedOrNormal(builder.define("TRANSLUCENT"), translucentFrag, frag);
+
         }
-        var builder = Shader.make()
-                .apply(this.properties::apply)
-                .defineIf("TAA_PATCH", taa != null)
-                .defineIf("DEBUG_RENDER", false)
-
-                //.defineIf("USE_NV_JANK", Capabilities.INSTANCE.isNvidia)//TODO: fix use capability to try compile the jank thing to see if it can be and use that
-
-                //.defineIf("USE_NV_BARRY", Capabilities.INSTANCE.nvBarryCoords)
-
-                .addSource(ShaderType.VERTEX, vertex);
-
-        //Apply per face tinting
-        addDirectionalFaceTint(builder, Minecraft.getInstance().level);
-
-        String frag = ShaderLoader.parse("voxy:lod/gl46/quads.frag");
-
-        String opaqueFrag = pipeline.patchOpaqueShader(this, frag);
-        opaqueFrag = opaqueFrag==null?frag:opaqueFrag;
-
-        //TODO: find a more robust/nicer way todo this
-        this.terrainShader = tryCompilePatchedOrNormal(builder, opaqueFrag, frag);
-
-        String translucentFrag = pipeline.patchTranslucentShader(this, frag);
-        translucentFrag = translucentFrag==null?frag:translucentFrag;
-
-        this.translucentTerrainShader = tryCompilePatchedOrNormal(builder.define("TRANSLUCENT"), translucentFrag, frag);
-
         if (this.pipeline.hasTAA()) {
             this.cullShader = Shader.make()
                     .apply(this.properties::apply)
@@ -192,8 +202,14 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         glDepthFunc(this.properties.closerEqualDepthCompare());
         this.terrainShader.bind();
         glBindVertexArray(GlVertexArray.STATIC_VAO);//Needs to be before binding
-        this.pipeline.setupAndBindOpaque(viewport);
-        this.bindRenderingBuffers(viewport);
+        if (this.pipeline instanceof me.cortex.voxy.client.core.IrisVoxyRenderPipeline iris && iris._getData().prototype != null) {
+            this.bindRenderingBuffers(viewport);
+            this.pipeline.setupAndBindOpaque(viewport);
+            LightMapHelper.bind(2);
+        } else {
+            this.pipeline.setupAndBindOpaque(viewport);
+            this.bindRenderingBuffers(viewport);
+        }
 
         glMemoryBarrier(GL_COMMAND_BARRIER_BIT|GL_SHADER_STORAGE_BARRIER_BIT);//Barrier everything is needed
         glProvokingVertex(GL_FIRST_VERTEX_CONVENTION);
@@ -202,6 +218,9 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
             glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
         }
         glMultiDrawElementsIndirectCountARB(GL_TRIANGLES, GL_UNSIGNED_SHORT, indirectOffset, drawCountOffset, maxDrawCount, 0);
+        if (this.pipeline instanceof me.cortex.voxy.client.core.IrisVoxyRenderPipeline iris && iris._getData().prototype != null) {
+            iris._getData().prototype.recordSubmission(false, viewport);
+        }
         if (VoxyClient.getOcclusionDebugState()==3) {
             glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         }
@@ -237,12 +256,21 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         glDepthFunc(this.properties.closerEqualDepthCompare());
         this.translucentTerrainShader.bind();
         glBindVertexArray(GlVertexArray.STATIC_VAO);//Needs to be before binding
-        this.pipeline.setupAndBindTranslucent(viewport);
-        this.bindRenderingBuffers(viewport);
+        if (this.pipeline instanceof me.cortex.voxy.client.core.IrisVoxyRenderPipeline iris && iris._getData().prototype != null) {
+            this.bindRenderingBuffers(viewport);
+            this.pipeline.setupAndBindTranslucent(viewport);
+            LightMapHelper.bind(2);
+        } else {
+            this.pipeline.setupAndBindTranslucent(viewport);
+            this.bindRenderingBuffers(viewport);
+        }
 
         glMemoryBarrier(GL_COMMAND_BARRIER_BIT|GL_SHADER_STORAGE_BARRIER_BIT);//Barrier everything is needed
         glProvokingVertex(GL_FIRST_VERTEX_CONVENTION);
         glMultiDrawElementsIndirectCountARB(GL_TRIANGLES, GL_UNSIGNED_SHORT, TRANSLUCENT_OFFSET*5*4, 4*4, Math.min(this.geometryManager.getSectionCount(), TRANSLUCENT_DRAW_COUNT), 0);
+        if (this.pipeline instanceof me.cortex.voxy.client.core.IrisVoxyRenderPipeline iris && iris._getData().prototype != null) {
+            iris._getData().prototype.recordSubmission(true, viewport);
+        }
 
         glEnable(GL_CULL_FACE);
         glBindVertexArray(0);

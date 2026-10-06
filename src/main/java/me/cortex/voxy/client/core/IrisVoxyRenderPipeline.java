@@ -43,6 +43,7 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
             throw new IllegalStateException("Pipeline data already bound");
         }
         this.data.thePipeline = this;
+        if (data.prototype != null) data.prototype.owner = this;
 
         //Bind the drawbuffers
         var oDT = this.data.opaqueDrawTargets;
@@ -90,6 +91,7 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
             throw new IllegalStateException();
         }
         this.data.thePipeline = null;
+        if (this.data.prototype != null) this.data.prototype.close();
 
         this.depthBlit.delete();
         this.fbTranslucent.free();
@@ -215,12 +217,14 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
     public void setupAndBindOpaque(Viewport<?> viewport) {
         this.fb.bind();
         this.doBindings();
+        if (this.data.prototype != null) this.data.prototype.bind(false, viewport);
     }
 
     @Override
     public void setupAndBindTranslucent(Viewport<?> viewport) {
         this.fbTranslucent.bind();
         this.doBindings();
+        if (this.data.prototype != null) this.data.prototype.bind(true, viewport);
         if (this.data.getBlender() != null) {
             this.data.getBlender().run();
         }

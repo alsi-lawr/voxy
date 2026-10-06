@@ -94,6 +94,9 @@ public abstract class MixinLevelRenderer implements IVoxyRenderSystemHolder {
         try {
             this.renderer = new VoxyRenderSystem(world, instance.getServiceManager());
         } catch (RuntimeException e) {
+            if (IrisUtil.IRIS_INSTALLED && me.cortex.voxy.client.iris.DhPrototype.activeEnvironment()) {
+                throw e;
+            }
             if (IrisUtil.irisShaderPackEnabled()) {
                 IrisUtil.disableIrisShaders();
             } else {

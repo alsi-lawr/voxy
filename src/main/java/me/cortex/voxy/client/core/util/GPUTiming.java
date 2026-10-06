@@ -23,6 +23,9 @@ public class GPUTiming {
     private String[] lables = new String[0];
 
     private boolean enabled = false;
+    private final String prototypeTimingOutput = System.getProperty("voxy.dhPrototype.timingOutput");
+    private StringBuilder prototypeTimings = prototypeTimingOutput == null ? null : new StringBuilder("sample,cpuReceiptNanos,interval,label,gpuDeltaNanos\n");
+    private int prototypeTimingSamples;
 
     public void marker() {
         this.marker(null);
@@ -61,6 +64,7 @@ public class GPUTiming {
 
     public void tick() {
         this.timingSet.download((meta,data)->{
+            this.recordPrototypeTiming(meta, data);
             long current = data[0];
 
             if (data.length-1!=this.timings.length) {
@@ -81,7 +85,30 @@ public class GPUTiming {
         this.timingSet.tick();
     }
 
+    private void recordPrototypeTiming(String[] labels, long[] timestamps) {
+        if (prototypeTimings == null) return;
+        long receiptTime = System.nanoTime();
+        for (int i = 1; i < timestamps.length; i++) {
+            prototypeTimings.append(prototypeTimingSamples).append(',').append(receiptTime).append(',').append(i - 1).append(',')
+                    .append(labels[i - 1] == null ? "" : labels[i - 1]).append(',').append(timestamps[i] - timestamps[i - 1]).append('\n');
+        }
+        if (++prototypeTimingSamples == 512) this.flushPrototypeTimings();
+    }
+
+    private void flushPrototypeTimings() {
+        if (prototypeTimings == null) return;
+        try {
+            var path = java.nio.file.Path.of(prototypeTimingOutput);
+            if (path.getParent() != null) java.nio.file.Files.createDirectories(path.getParent());
+            java.nio.file.Files.writeString(path, prototypeTimings);
+            prototypeTimings = null;
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("VOXY-003 transient GPU timing receipt failed", e);
+        }
+    }
+
     public void free() {
+        this.flushPrototypeTimings();
         this.timingSet.free();
     }
 

@@ -63,6 +63,22 @@ dependencies {
     include implementation('org.tukaani:xz:1.10')
 }
 
+configurations { irisPrototypeTools }
+dependencies { irisPrototypeTools("maven.modrinth:iris:${project.iris_version}") { transitive = false } }
+def extractIrisPrototypeTools = tasks.register('extractIrisPrototypeTools', Copy) {
+    from { zipTree(configurations.irisPrototypeTools.singleFile) }
+    include 'META-INF/jars/glsl-transformer-2.0.1.jar', 'META-INF/jars/antlr4-runtime-4.13.1.jar', 'META-INF/jars/jcpp-1.4.14.jar'
+    eachFile { path = name }
+    includeEmptyDirs = false
+    into layout.buildDirectory.dir('iris-prototype-tools')
+}
+def irisPrototypeTools = files(
+    layout.buildDirectory.file('iris-prototype-tools/glsl-transformer-2.0.1.jar'),
+    layout.buildDirectory.file('iris-prototype-tools/antlr4-runtime-4.13.1.jar'),
+    layout.buildDirectory.file('iris-prototype-tools/jcpp-1.4.14.jar')
+).builtBy(extractIrisPrototypeTools)
+dependencies { compileOnly irisPrototypeTools; testRuntimeOnly irisPrototypeTools }
+
 java { toolchain.languageVersion = JavaLanguageVersion.of(17) }
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
@@ -160,3 +176,25 @@ tasks.register('indiumModelContextTest', JavaExec) {
     mainClass = 'me.cortex.voxy.client.core.model.bakery.IndiumModelContextTest'
 }
 tasks.named('check') { dependsOn 'indiumModelContextTest' }
+
+tasks.register('dhPrototypeProbe', JavaExec) {
+    dependsOn testClasses
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
+    classpath = sourceSets.test.runtimeClasspath + sourceSets.main.compileClasspath
+    mainClass = 'me.cortex.voxy.client.iris.DhPrototypeProbe'
+    args project.findProperty('dhProbeOutput') ?: layout.buildDirectory.dir('dh-prototype-probe').get().asFile.absolutePath
+    doFirst { args project.property('dhProbeReference') }
+}
+
+tasks.register('dhPrototypeIdentityPack', Zip) {
+    from 'src/test/resources/dh-prototype-identity'
+    destinationDirectory = layout.buildDirectory.dir('dh-prototype-fixtures')
+    archiveFileName = 'voxy-003-identity-dh.zip'
+}
+
+tasks.register('dhPrototypeNativePack', Zip) {
+    from 'src/test/resources/dh-prototype-identity'
+    from 'src/test/resources/dh-prototype-native'
+    destinationDirectory = layout.buildDirectory.dir('dh-prototype-fixtures')
+    archiveFileName = 'voxy-003-identity-native.zip'
+}

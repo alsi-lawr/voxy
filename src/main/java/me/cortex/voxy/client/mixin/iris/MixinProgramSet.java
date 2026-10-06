@@ -28,6 +28,9 @@ public class MixinProgramSet implements IGetVoxyPatchData {
     private void voxy$injectPatchMaker(AbsolutePackPath directory, Function<AbsolutePackPath, String> sourceProvider, ShaderProperties shaderProperties, ShaderPack pack, CallbackInfo ci) {
         if (VoxyConfig.CONFIG.isRenderingEnabled() && IrisUtil.SHADER_SUPPORT) {
             this.patchData = IrisShaderPatch.makePatch(pack, directory, sourceProvider);
+            if (this.patchData == null && sourceProvider.apply(directory.resolve("voxy.json")) == null) {
+                this.patchData = IrisShaderPatch.makePrototype((ProgramSet)(Object)this);
+            }
         }
         /*
         if (this.patchData != null) {

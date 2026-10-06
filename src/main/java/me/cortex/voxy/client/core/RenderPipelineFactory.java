@@ -37,6 +37,7 @@ public class RenderPipelineFactory {
             try {
                 return new IrisVoxyRenderPipeline(properties, pipeData, nodeManager, nodeCleaner, traversal, frexSupplier);
             } catch (Exception e) {
+                if (pipeData.prototype != null) throw e;
                 Logger.error("Failed to create iris render pipeline", e);
                 IrisUtil.disableIrisShaders();
                 return null;

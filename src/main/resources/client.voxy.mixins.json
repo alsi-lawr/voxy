@@ -13,6 +13,7 @@
     "iris.MixinMatrixUniforms",
     "iris.MixinProgramSet",
     "iris.MixinShaderPackSourceNames",
+    "iris.MixinShaderPackPrototype",
     "iris.MixinStandardMacros",
     "minecraft.MixinClientChunkCache",
     "minecraft.MixinClientLevel",

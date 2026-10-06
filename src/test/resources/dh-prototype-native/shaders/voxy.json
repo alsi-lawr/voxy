@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "opaqueDrawBuffers": [
+    0
+  ],
+  "translucentDrawBuffers": [
+    0
+  ],
+  "uniforms": [],
+  "samplers": {
+    "lightmap": "sampler2D"
+  },
+  "opaquePatchData": "layout(location=0) out vec4 probeColour; void voxy_emitFragment(VoxyFragmentParameters p) { probeColour = p.sampledColour * p.tinting * texture(lightmap, p.lightMap); }",
+  "translucentPatchData": "layout(location=0) out vec4 probeColour; void voxy_emitFragment(VoxyFragmentParameters p) { probeColour = p.sampledColour * p.tinting * texture(lightmap, p.lightMap); }",
+  "skipShaderDepthHackFix": true
+}
