@@ -16,11 +16,13 @@ import net.irisshaders.iris.uniforms.builtin.BuiltinReplacementUniforms;
 import net.irisshaders.iris.uniforms.custom.CustomUniforms;
 import org.joml.Matrix3f;
 import org.joml.Matrix4f;
+import org.lwjgl.system.MemoryStack;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.lwjgl.opengl.GL20.*;
+import static org.lwjgl.opengl.GL30.*;
 
 final class DhPrototypeProgram {
     private final int id;
@@ -35,11 +37,12 @@ final class DhPrototypeProgram {
     private final float[] matrixValues = new float[16];
     private final float[] normalValues = new float[9];
     private final Map<String, Integer> locations = new LinkedHashMap<>();
+    private final Map<String, Integer> samplerLocations = new LinkedHashMap<>();
     private final Matrix4f previousProjection = new Matrix4f();
     private final Matrix4f currentProjection = new Matrix4f();
     private int frame = -1;
 
-    DhPrototypeProgram(int id, ProgramSource source, IrisRenderingPipeline pipeline, CustomUniforms customUniforms) {
+    DhPrototypeProgram(int id, ProgramSource source, IrisRenderingPipeline pipeline, CustomUniforms customUniforms, boolean waterPass) {
         this.id = id;
         this.source = source;
         this.customUniforms = customUniforms;
@@ -67,10 +70,51 @@ final class DhPrototypeProgram {
         uniforms = uniformBuilder.buildUniforms();
         var samplerBuilder = ProgramSamplers.builder(id, ImmutableSet.of(0, 1, 2));
         var imageBuilder = ProgramImages.builder(id);
-        pipeline.addGbufferOrShadowSamplers(samplerBuilder, imageBuilder, pipeline::getFlippedAfterPrepare, false, false, true, false);
+        // Water writes fbTranslucent: its original arbitrary-pixel DH reads must use completed opaque depth instead.
+        var passSamplers = waterPass ? VoxySamplers.waterDepthSamplers(samplerBuilder, () -> VoxySamplers.prototypeDepth(pipeline, true)) : samplerBuilder;
+        pipeline.addGbufferOrShadowSamplers(passSamplers, imageBuilder, pipeline::getFlippedAfterPrepare, false, false, true, false);
         samplers = samplerBuilder.build();
         images = imageBuilder.build();
+        try (var stack = MemoryStack.stackPush()) {
+            var size = stack.mallocInt(1);
+            var type = stack.mallocInt(1);
+            int count = glGetProgrami(id, GL_ACTIVE_UNIFORMS);
+            for (int i = 0; i < count; i++) {
+                String name = glGetActiveUniform(id, i, size, type);
+                if (type.get(0) == GL_SAMPLER_2D || type.get(0) == GL_SAMPLER_2D_SHADOW) {
+                    for (int element = 0; element < size.get(0); element++) {
+                        String entry = size.get(0) == 1 ? name : name.replace("[0]", "[" + element + "]");
+                        samplerLocations.put(entry, glGetUniformLocation(id, entry));
+                    }
+                }
+            }
+        }
         DhPrototype.write(source.getName() + "-bindings.txt", "uniformLocations=" + locations + "\nreservedVoxySamplers=[0,1,2]\n");
+    }
+
+    String resourceBindings() {
+        var receipt = new StringBuilder("program=" + id + "\nactiveProgram=" + glGetInteger(GL_CURRENT_PROGRAM)
+                + "\ndrawFramebuffer=" + glGetInteger(GL_DRAW_FRAMEBUFFER_BINDING)
+                + "\nwrittenDepth=" + glGetFramebufferAttachmentParameteri(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME)
+                + "\nwrittenDepthObjectType=" + glGetFramebufferAttachmentParameteri(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE)
+                + "\ndepthWrites=" + glGetBoolean(GL_DEPTH_WRITEMASK) + "\n");
+        for (int i = 0; i < source.getDirectives().getDrawBuffers().length; i++) {
+            int attachment = glGetInteger(GL_DRAW_BUFFER0 + i);
+            receipt.append("writtenColorSlot=").append(i).append(" attachment=").append(attachment)
+                    .append(" object=").append(attachment == GL_NONE ? 0 : glGetFramebufferAttachmentParameteri(GL_DRAW_FRAMEBUFFER, attachment, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME)).append('\n');
+        }
+        int activeTexture = glGetInteger(GL_ACTIVE_TEXTURE);
+        try {
+            samplerLocations.forEach((name, location) -> {
+                int unit = glGetUniformi(id, location);
+                glActiveTexture(GL_TEXTURE0 + unit);
+                receipt.append("sampled=").append(name).append(" unit=").append(unit)
+                        .append(" texture2D=").append(glGetInteger(GL_TEXTURE_BINDING_2D)).append('\n');
+            });
+        } finally {
+            glActiveTexture(activeTexture);
+        }
+        return receipt.toString();
     }
 
     void bind(Viewport<?> viewport) {

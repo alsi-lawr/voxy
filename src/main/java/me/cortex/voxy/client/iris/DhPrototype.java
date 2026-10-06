@@ -10,6 +10,7 @@ import net.irisshaders.iris.shaderpack.loading.ProgramId;
 import net.irisshaders.iris.shaderpack.programs.ProgramSet;
 import net.irisshaders.iris.shaderpack.programs.ProgramSource;
 import net.irisshaders.iris.uniforms.custom.CustomUniforms;
+import me.cortex.voxy.client.mixin.iris.IrisRenderingPipelineAccessor;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -118,8 +119,8 @@ public final class DhPrototype {
     }
 
     public void attach(int terrainId, int waterId, long compileNanos) {
-        opaqueProgram = new DhPrototypeProgram(terrainId, terrain, pipeline, uniforms);
-        waterProgram = new DhPrototypeProgram(waterId, water, pipeline, uniforms);
+        opaqueProgram = new DhPrototypeProgram(terrainId, terrain, pipeline, uniforms, false);
+        waterProgram = new DhPrototypeProgram(waterId, water, pipeline, uniforms, true);
         write(receipt + "-link.txt", "terrain=" + terrainId + " water=" + waterId + " linked by Voxy Shader.compile\ncompileNanos=" + compileNanos + "\n");
     }
 
@@ -137,8 +138,28 @@ public final class DhPrototype {
                 + "\nopaqueDepth=" + owner.fb.getDepthTex().id + "\nwaterDepth=" + owner.fbTranslucent.getDepthTex().id
                 + "\nopaqueTargets=" + java.util.Arrays.toString(owner._getData().opaqueDrawTargets)
                 + "\nwaterTargets=" + java.util.Arrays.toString(owner._getData().translucentDrawTargets)
+                + "\nplacement=immediate Voxy water after opaque; NOT Iris post-translucent DH placement"
+                + "\nirisPhase=" + pipeline.getPhase()
+                + "\nsamplerFlipSupplier=getFlippedAfterPrepare; attachmentFlipSet=getFlippedAfterPrepare"
+                + "\nprepareFlips=" + pipeline.getFlippedAfterPrepare() + "\nafterTranslucentFlips=" + pipeline.getFlippedAfterTranslucent()
+                + "\nwaterDhDepthMeaning=completed opaque fb for dhDepthTex/0/1; water-inclusive reference semantics NOT established"
+                + "\nlaterIrisDhDepthMeaning=dhDepthTex/0 final fbTranslucent; dhDepthTex1 opaque fb\n"
+                + (translucent ? waterProgram : opaqueProgram).resourceBindings() + targetInventory()
                 + "\nprojection=" + viewport.projection + "\nmodelView=" + viewport.modelView
                 + "\nsubmitted=glMultiDrawElementsIndirectCountARB; execution/visual/cost acceptance NOT inferred\n");
+    }
+
+    private String targetInventory() {
+        var targets = ((IrisRenderingPipelineAccessor)pipeline).getRenderTargets();
+        var receipt = new StringBuilder();
+        for (int i = 0; i < targets.getRenderTargetCount(); i++) {
+            var target = targets.get(i);
+            if (target == null) continue;
+            receipt.append("irisTarget=").append(i).append(" main=").append(target.getMainTexture())
+                    .append(" alt=").append(target.getAltTexture()).append(" format=").append(target.getInternalFormat())
+                    .append(" size=").append(target.getWidth()).append('x').append(target.getHeight()).append('\n');
+        }
+        return receipt.toString();
     }
 
     public void close() {

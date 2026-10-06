@@ -3,9 +3,44 @@ package me.cortex.voxy.client.iris;
 import net.irisshaders.iris.gl.sampler.GlSampler;
 import net.irisshaders.iris.gl.sampler.SamplerHolder;
 import net.irisshaders.iris.gl.texture.TextureType;
+import net.irisshaders.iris.gl.state.ValueUpdateNotifier;
 import net.irisshaders.iris.pipeline.IrisRenderingPipeline;
 
+import java.util.function.IntSupplier;
+
 public class VoxySamplers {
+    static SamplerHolder waterDepthSamplers(SamplerHolder samplers, IntSupplier completedOpaqueDepth) {
+        return new SamplerHolder() {
+            private IntSupplier depth(IntSupplier texture, String[] names) {
+                for (String name : names) {
+                    if (name.equals("dhDepthTex") || name.equals("dhDepthTex0") || name.equals("dhDepthTex1")) return completedOpaqueDepth;
+                }
+                return texture;
+            }
+
+            @Override
+            public void addExternalSampler(int unit, String... names) { samplers.addExternalSampler(unit, names); }
+
+            @Override
+            public boolean hasSampler(String name) { return samplers.hasSampler(name); }
+
+            @Override
+            public boolean addDefaultSampler(TextureType type, IntSupplier texture, ValueUpdateNotifier notifier, GlSampler sampler, String... names) {
+                return samplers.addDefaultSampler(type, texture, notifier, sampler, names);
+            }
+
+            @Override
+            public boolean addDynamicSampler(TextureType type, IntSupplier texture, GlSampler sampler, String... names) {
+                return samplers.addDynamicSampler(type, depth(texture, names), sampler, names);
+            }
+
+            @Override
+            public boolean addDynamicSampler(TextureType type, IntSupplier texture, ValueUpdateNotifier notifier, GlSampler sampler, String... names) {
+                return samplers.addDynamicSampler(type, depth(texture, names), notifier, sampler, names);
+            }
+        };
+    }
+
     public static int prototypeDepth(IrisRenderingPipeline pipeline, boolean opaque) {
         var data = ((IGetIrisVoxyPipelineData)pipeline).voxy$getPipelineData();
         if (data == null || data.thePipeline == null) return 0;
