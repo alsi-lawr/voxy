@@ -66,6 +66,7 @@ java { toolchain.languageVersion = JavaLanguageVersion.of(17) }
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     options.release = 17
+    options.compilerArgs += ['--add-modules=jdk.incubator.vector']
     options.deprecation = true
 }
 
@@ -111,6 +112,7 @@ jar {
 jmh {
     zip64 = true
     includes = ['SaveLoadJMH']
+    jvmArgsAppend = ['--add-modules=jdk.incubator.vector']
 }
 
 // Unlike game integration tests, these fixed-mask checks need neither Minecraft nor GL.
@@ -137,3 +139,12 @@ tasks.register('vertexConsumerTest', JavaExec) {
     mainClass = 'me.cortex.voxy.client.core.model.bakery.ReuseVertexConsumerTest'
 }
 tasks.named('check') { dependsOn 'vertexConsumerTest' }
+
+tasks.register('nonAirCountTest', JavaExec) {
+    dependsOn testClasses
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'me.cortex.voxy.common.world.NonAirCountTest'
+    jvmArgs '--add-modules=jdk.incubator.vector'
+}
+tasks.named('check') { dependsOn 'nonAirCountTest' }

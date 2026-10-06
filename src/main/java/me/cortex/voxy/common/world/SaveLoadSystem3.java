@@ -5,7 +5,6 @@ import it.unimi.dsi.fastutil.longs.Long2ShortOpenHashMap;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.util.MemoryBuffer;
 import me.cortex.voxy.common.util.ThreadLocalMemoryBuffer;
-import me.cortex.voxy.common.world.other.Mapper;
 import org.lwjgl.system.MemoryUtil;
 
 public class SaveLoadSystem3 {
@@ -98,11 +97,7 @@ public class SaveLoadSystem3 {
         }
 
         if (section.lvl == 0) {
-            int notEmpty = 0;
-            for (long block : blockData) {
-                notEmpty += Mapper.isNotAirInt(block);
-            }
-            section.nonEmptyBlockCount = notEmpty;
+            section.nonEmptyBlockCount = NonAirCount.count(blockData);
         }
 
         ptr = lutBasePtr + (metadata & 0xFFFF) * 8L;
