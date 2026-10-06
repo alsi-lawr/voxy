@@ -3,6 +3,7 @@ package me.cortex.voxy.client.core.model.bakery;
 import com.mojang.blaze3d.vertex.PoseStack;
 import me.cortex.voxy.client.core.model.ModelFactory;
 import me.cortex.voxy.common.util.UnsafeUtil;
+import net.fabricmc.fabric.api.rendering.data.v1.RenderAttachedBlockView;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.level.BlockAndTintGetter;
 import net.minecraft.client.renderer.block.BlockRenderDispatcher;
@@ -89,6 +90,22 @@ public class SoftwareModelTextureBakery {
         this.rasterizer.setSamplerTexture(texture, width, height);
     }
 
+    static final class ModelBlockView implements RenderAttachedBlockView {
+        private final BlockState state;
+
+        ModelBlockView(BlockState state) { this.state = state; }
+
+        @Override public float getShade(Direction direction, boolean shade) { return 1; }
+        @Override public LevelLightEngine getLightEngine() { return null; }
+        @Override public int getBlockTint(BlockPos pos, ColorResolver resolver) { return -1; }
+        @Override public BlockEntity getBlockEntity(BlockPos pos) { return null; }
+        @Override public Object getBlockEntityRenderAttachment(BlockPos pos) { return null; }
+        @Override public BlockState getBlockState(BlockPos pos) { return pos.equals(BlockPos.ZERO) ? state : Blocks.AIR.defaultBlockState(); }
+        @Override public FluidState getFluidState(BlockPos pos) { return getBlockState(pos).getFluidState(); }
+        @Override public int getHeight() { return 0; }
+        @Override public int getMinBuildHeight() { return 0; }
+    }
+
     private void bakeBlockModel(BlockState state) {
         if (state.getRenderShape() == RenderShape.INVISIBLE) {
             return;//Dont bake if invisible
@@ -97,16 +114,7 @@ public class SoftwareModelTextureBakery {
         var fabricModel = (net.fabricmc.fabric.api.renderer.v1.model.FabricBakedModel) model;
         if (!fabricModel.isVanillaAdapter()) {
             if (this.fabricBakery == null) this.fabricBakery = new FabricModelBakery(this.opaqueVC, this.translucentVC);
-            this.fabricBakery.bake(fabricModel, new BlockAndTintGetter() {
-                @Override public float getShade(Direction direction, boolean shade) { return 1; }
-                @Override public LevelLightEngine getLightEngine() { return null; }
-                @Override public int getBlockTint(BlockPos pos, ColorResolver resolver) { return -1; }
-                @Override public BlockEntity getBlockEntity(BlockPos pos) { return null; }
-                @Override public BlockState getBlockState(BlockPos pos) { return pos.equals(BlockPos.ZERO) ? state : Blocks.AIR.defaultBlockState(); }
-                @Override public FluidState getFluidState(BlockPos pos) { return getBlockState(pos).getFluidState(); }
-                @Override public int getHeight() { return 0; }
-                @Override public int getMinBuildHeight() { return 0; }
-            }, state);
+            this.fabricBakery.bake(fabricModel, new ModelBlockView(state), state);
             return;
         }
         var layer = ItemBlockRenderTypes.getChunkRenderType(state);

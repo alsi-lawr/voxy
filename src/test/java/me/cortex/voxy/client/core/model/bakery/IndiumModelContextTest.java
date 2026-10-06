@@ -6,6 +6,7 @@ import net.fabricmc.fabric.api.renderer.v1.RendererAccess;
 import net.fabricmc.fabric.api.renderer.v1.material.BlendMode;
 import net.fabricmc.fabric.api.renderer.v1.model.FabricBakedModel;
 import net.fabricmc.fabric.api.renderer.v1.render.RenderContext;
+import net.fabricmc.fabric.api.rendering.data.v1.RenderAttachedBlockView;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.client.renderer.block.model.ItemOverrides;
@@ -62,10 +63,24 @@ public final class IndiumModelContextTest {
         var opaque = new ReuseVertexConsumer();
         var translucent = new ReuseVertexConsumer(1);
         var model = new VanillaModel();
+        var openedModel = new VanillaModel();
         var order = new ArrayList<Integer>();
         var bakery = new FabricModelBakery(opaque, translucent);
         var state = Blocks.STONE.defaultBlockState();
         try {
+            var view = new SoftwareModelTextureBakery.ModelBlockView(state);
+            var neighbor = BlockPos.ZERO.above();
+            if (view.getBlockState(BlockPos.ZERO) != state || !view.getBlockState(neighbor).isAir()
+                    || view.getFluidState(BlockPos.ZERO) != state.getFluidState()
+                    || !view.getFluidState(neighbor).isEmpty()
+                    || view.getBlockEntity(BlockPos.ZERO) != null || view.getBlockEntity(neighbor) != null
+                    || view.getBlockEntityRenderAttachment(neighbor) != null)
+                throw new AssertionError("State-only model view changed its neutral world semantics");
+            var fluidState = Blocks.WATER.defaultBlockState();
+            var fluidView = new SoftwareModelTextureBakery.ModelBlockView(fluidState);
+            if (fluidView.getFluidState(BlockPos.ZERO) != fluidState.getFluidState()
+                    || !fluidView.getFluidState(neighbor).isEmpty())
+                throw new AssertionError("Model view lost state-derived fluid data");
             boolean rejected = false;
             try {
                 bakery.bake(new FabricBakedModel() {
@@ -87,6 +102,8 @@ public final class IndiumModelContextTest {
                 @Override public void emitBlockQuads(net.minecraft.world.level.BlockAndTintGetter view,
                         BlockState state, BlockPos pos, java.util.function.Supplier<RandomSource> random,
                         RenderContext context) {
+                    var selectedModel = ((RenderAttachedBlockView) view).getBlockEntityRenderAttachment(pos)
+                            == Boolean.TRUE ? openedModel : model;
                     var carrier = IndiumModelContext.create((FabricModelBakery) context);
                     carrier.pushTransform(quad -> {
                         order.add(1);
@@ -96,7 +113,7 @@ public final class IndiumModelContextTest {
                         return true;
                     });
                     carrier.pushTransform(quad -> { order.add(2); quad.material(material); return true; });
-                    model.emitBlockQuads(view, state, pos, random, carrier);
+                    selectedModel.emitBlockQuads(view, state, pos, random, carrier);
                     carrier.popTransform();
                     carrier.popTransform();
                     if (carrier.hasTransform()) throw new AssertionError("Transforms not popped");
@@ -110,8 +127,8 @@ public final class IndiumModelContextTest {
                     carrier.getEmitter().fromVanilla(model.quad, material, Direction.UP).emit();
                     carrier.popTransform();
                 }
-            }, null, state);
-            if (model.faceCalls != 14 || !order.equals(List.of(2, 1, 2, 1, 3))) throw new AssertionError("All-face/transform order changed");
+            }, view, state);
+            if (openedModel.faceCalls != 0 || model.faceCalls != 14 || !order.equals(List.of(2, 1, 2, 1, 3))) throw new AssertionError("Attachment model choice/all-face/transform order changed");
             if (opaque.quadCount() != 2 || translucent.quadCount() != 3) throw new AssertionError("Provider/fallback/mesh/filter transport changed");
             long first = translucent.getAddress();
             if (MemoryUtil.memGetFloat(first) != 0.125f || MemoryUtil.memGetFloat(first + 16) != 0.5f
@@ -121,7 +138,7 @@ public final class IndiumModelContextTest {
             long meshFirst = first + 8L * ReuseVertexConsumer.VERTEX_FORMAT_SIZE;
             if (MemoryUtil.memGetFloat(meshFirst + 16) != 0.875f || MemoryUtil.memGetFloat(meshFirst + 20) != 0.5f)
                 throw new AssertionError("Provider mesh replay skipped transform");
-            System.out.println("Exact Indium vanilla and mesh defaults reproduced both old casts; carrier preserved all-face non-cube, LIFO transform/material/emissive callback, mesh/fallback/filter transport (no GL)");
+            System.out.println("State-only attachment view selected non-empty unopened model; exact Indium carrier preserved all-face non-cube, LIFO transform/material/emissive callback, mesh/fallback/filter transport (no GL)");
         } finally { opaque.free(); translucent.free(); }
     }
 }
