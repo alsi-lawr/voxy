@@ -40,6 +40,7 @@ dependencies {
     modCompileOnly "maven.modrinth:chunky:${project.chunky_version}"
     modCompileOnly "maven.modrinth:vivecraft:${project.vivecraft_version}"
     modCompileOnly "maven.modrinth:nvidium:${project.nvidium_version}"
+    modCompileOnly "maven.modrinth:indium:${project.indium_version}"
 
     // Minecraft owns core/OpenGL LWJGL; Voxy supplies only the matching storage bindings.
     implementation platform("org.lwjgl:lwjgl-bom:${project.lwjgl_version}")
@@ -148,3 +149,14 @@ tasks.register('nonAirCountTest', JavaExec) {
     jvmArgs '--add-modules=jdk.incubator.vector'
 }
 tasks.named('check') { dependsOn 'nonAirCountTest' }
+
+def indiumTestClasspath = sourceSets.main.compileClasspath.filter { it.name.startsWith('indium-') }
+sourceSets.test.compileClasspath += indiumTestClasspath
+
+tasks.register('indiumModelContextTest', JavaExec) {
+    dependsOn testClasses
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
+    classpath = sourceSets.test.runtimeClasspath + indiumTestClasspath
+    mainClass = 'me.cortex.voxy.client.core.model.bakery.IndiumModelContextTest'
+}
+tasks.named('check') { dependsOn 'indiumModelContextTest' }

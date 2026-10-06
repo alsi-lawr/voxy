@@ -1,6 +1,7 @@
 package me.cortex.voxy.client.core.model.bakery;
 
 import net.fabricmc.fabric.api.renderer.v1.RendererAccess;
+import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.fabric.api.renderer.v1.material.RenderMaterial;
 import net.fabricmc.fabric.api.renderer.v1.mesh.*;
 import net.fabricmc.fabric.api.renderer.v1.model.FabricBakedModel;
@@ -27,6 +28,7 @@ final class FabricModelBakery implements RenderContext {
     private final ReuseVertexConsumer opaque, translucent;
     private final MeshBuilder builder;
     private final RenderMaterial shaded, unshaded;
+    private final RenderContext modelContext;
     private final Emitter emitter = new Emitter();
     private final ArrayList<QuadTransform> transforms = new ArrayList<>();
     private final RandomSource random = new SingleThreadedRandomSource(42L);
@@ -55,37 +57,47 @@ final class FabricModelBakery implements RenderContext {
         this.builder = renderer.meshBuilder();
         this.shaded = renderer.materialFinder().find();
         this.unshaded = renderer.materialFinder().disableDiffuse(true).find();
+        this.modelContext = FabricLoader.getInstance().isModLoaded("indium")
+                ? IndiumModelContext.create(this) : this;
     }
 
     void bake(FabricBakedModel model, BlockAndTintGetter view, BlockState state) {
         this.state = state;
         try {
-            model.emitBlockQuads(view, state, BlockPos.ZERO, randomSupplier, this);
+            model.emitBlockQuads(view, state, BlockPos.ZERO, randomSupplier, modelContext);
         } finally {
-            // Public API reset: one temporary mesh per state, never per frame/quad.
-            builder.build();
+            if (modelContext == this) builder.build();
+            else modelContext.getEmitter();
             transforms.clear();
             this.state = null;
         }
     }
 
-    @Override public QuadEmitter getEmitter() { delegate = builder.getEmitter(); return emitter; }
+    @Override public QuadEmitter getEmitter() {
+        if (modelContext != this) return modelContext.getEmitter();
+        delegate = builder.getEmitter();
+        return emitter;
+    }
     @Override public boolean hasTransform() { return !transforms.isEmpty(); }
     @Override public void pushTransform(QuadTransform transform) { transforms.add(transform); }
     @Override public void popTransform() { transforms.remove(transforms.size() - 1); }
     @Override public Consumer<Mesh> meshConsumer() { return meshConsumer; }
     @Override public BakedModelConsumer bakedModelConsumer() { return fallback; }
 
+    void emitQuad(MutableQuadView quad) {
+        boolean visible = true;
+        for (int i = transforms.size() - 1; i >= 0 && visible; i--) visible = transforms.get(i).transform(quad);
+        if (visible) {
+            var layer = quad.material().blendMode().blockRenderLayer;
+            if (layer == null) layer = ItemBlockRenderTypes.getChunkRenderType(state);
+            var consumer = layer == RenderType.translucent() ? translucent : opaque;
+            consumer.quad(quad, state.is(BlockTags.LEAVES), layer);
+        }
+    }
+
     private final class Emitter implements QuadEmitter {
         @Override public QuadEmitter emit() {
-            boolean visible = true;
-            for (int i = transforms.size() - 1; i >= 0 && visible; i--) visible = transforms.get(i).transform(delegate);
-            if (visible) {
-                var layer = delegate.material().blendMode().blockRenderLayer;
-                if (layer == null) layer = ItemBlockRenderTypes.getChunkRenderType(state);
-                var consumer = layer == RenderType.translucent() ? translucent : opaque;
-                consumer.quad(delegate, state.is(BlockTags.LEAVES), layer);
-            }
+            emitQuad(delegate);
             delegate.emit();
             return this;
         }

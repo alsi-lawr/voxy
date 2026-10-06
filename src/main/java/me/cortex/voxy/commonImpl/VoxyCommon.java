@@ -44,7 +44,9 @@ public class VoxyCommon implements ModInitializer {
 
     @Override
     public void onInitialize() {
-
+        if (ModuleLayer.boot().findModule("jdk.incubator.vector").isEmpty()) {
+            throw new IllegalStateException("Voxy requires the JVM argument --add-modules=jdk.incubator.vector; add it to this instance's Java arguments before launching");
+        }
     }
 
     public interface IInstanceFactory {VoxyInstance create();}
