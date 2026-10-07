@@ -296,24 +296,29 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
     public void renderShadow(Viewport<?> viewport, boolean water) {
         var mdic = (MDICViewport)viewport;
         if (geometryManager.getSectionCount() == 0) return;
-        uploadUniformBuffer(mdic);
-        glDisable(GL_CULL_FACE);
-        glDisable(GL_BLEND);
-        glEnable(GL_DEPTH_TEST);
-        glDepthFunc(properties.closerEqualDepthCompare());
-        shadowShader.bind();
-        glBindVertexArray(GlVertexArray.STATIC_VAO);
-        bindRenderingBuffers(mdic);
-        if (water) pipeline.setupAndBindTranslucent(mdic); else pipeline.setupAndBindOpaque(mdic);
-        LightMapHelper.bind(2);
-        glMemoryBarrier(GL_COMMAND_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT);
-        glProvokingVertex(GL_FIRST_VERTEX_CONVENTION);
-        glMultiDrawElementsIndirectCountARB(GL_TRIANGLES, GL_UNSIGNED_SHORT,
-                water ? TRANSLUCENT_OFFSET * 20L : 0L, water ? 16L : 12L,
-                water ? Math.min(geometryManager.getSectionCount(), TRANSLUCENT_DRAW_COUNT) : OPAQUE_DRAW_COUNT, 0);
-        ((me.cortex.voxy.client.core.IrisVoxyRenderPipeline)pipeline)._getData().prototype.recordSubmission(water, viewport);
-        glEnable(GL_CULL_FACE);
-        glBindVertexArray(0);
+        boolean cullEnabled = glIsEnabled(GL_CULL_FACE);
+        try {
+            uploadUniformBuffer(mdic);
+            glDisable(GL_CULL_FACE);
+            glDisable(GL_BLEND);
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(properties.closerEqualDepthCompare());
+            shadowShader.bind();
+            glBindVertexArray(GlVertexArray.STATIC_VAO);
+            bindRenderingBuffers(mdic);
+            if (water) pipeline.setupAndBindTranslucent(mdic); else pipeline.setupAndBindOpaque(mdic);
+            LightMapHelper.bind(2);
+            glMemoryBarrier(GL_COMMAND_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT);
+            glProvokingVertex(GL_FIRST_VERTEX_CONVENTION);
+            glMultiDrawElementsIndirectCountARB(GL_TRIANGLES, GL_UNSIGNED_SHORT,
+                    water ? TRANSLUCENT_OFFSET * 20L : 0L, water ? 16L : 12L,
+                    water ? Math.min(geometryManager.getSectionCount(), TRANSLUCENT_DRAW_COUNT) : OPAQUE_DRAW_COUNT, 0);
+            ((me.cortex.voxy.client.core.IrisVoxyRenderPipeline)pipeline)._getData().prototype.recordSubmission(water, viewport);
+            glBindVertexArray(0);
+        } finally {
+            if (cullEnabled) glEnable(GL_CULL_FACE);
+            else glDisable(GL_CULL_FACE);
+        }
     }
 
     @Override
