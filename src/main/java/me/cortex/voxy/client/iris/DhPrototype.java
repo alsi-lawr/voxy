@@ -24,7 +24,7 @@ import java.util.Map;
 import java.util.TreeMap;
 
 public final class DhPrototype {
-    private static final String MODE = System.getProperty("voxy.dhPrototype", "off");
+    private static final String MODE = System.getProperty("voxy.dhPrototype", "auto");
     private static volatile boolean environmentActive;
     private static volatile String selectedPack;
     private static Path output;
@@ -106,14 +106,28 @@ public final class DhPrototype {
             clearRequest();
             return environment;
         }
+        boolean dhSources = false;
         try (var paths = Files.walk(root)) {
-            if (paths.anyMatch(path -> path.getFileName().toString().equals("voxy.json") && Files.isRegularFile(path))) {
-                clearRequest();
-                return environment;
+            var iterator = paths.filter(Files::isRegularFile).iterator();
+            while (iterator.hasNext()) {
+                String name = iterator.next().getFileName().toString();
+                if (name.equals("voxy.json")) {
+                    clearRequest();
+                    return environment;
+                }
+                int extension = name.lastIndexOf('.');
+                if (extension != -1 && java.util.Set.of("dh_terrain", "dh_water", "dh_shadow").contains(name.substring(0, extension))
+                        && java.util.Set.of("vsh", "fsh", "gsh", "tcs", "tes", "csh").contains(name.substring(extension + 1))) {
+                    dhSources = true;
+                }
             }
         } catch (IOException e) {
             throw new DhTranslationFailure(DhTranslationFailure.Code.RELOAD_FAILED, root.toUri().toString(), "loading", "native_metadata",
                     "cannot establish native metadata precedence", e);
+        }
+        if (MODE.equals("auto") && !dhSources) {
+            clearRequest();
+            return environment;
         }
         selectedPack = root.toUri().toString();
         requireNoDh();
@@ -200,7 +214,7 @@ public final class DhPrototype {
     }
 
     private Stages translate(ProgramSource source, Map<Tri<String, TextureType, TextureStage>, String> textures) {
-        if (!MODE.equals("pack") && source != shadow) source = DhPrototypeFixtures.source(MODE, source);
+        if (!MODE.equals("auto") && !MODE.equals("pack") && source != shadow) source = DhPrototypeFixtures.source(MODE, source);
         long start = System.nanoTime();
         var key = new DhTranslationCache.Key(environment.identity(), dimension, source.getName(),
                 DhTranslationCache.Source.from(source), textures);
