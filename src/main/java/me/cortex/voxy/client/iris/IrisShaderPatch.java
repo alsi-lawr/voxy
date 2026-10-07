@@ -312,10 +312,10 @@ public class IrisShaderPatch {
         };
     }
 
-    public static IrisShaderPatch makePrototype(net.irisshaders.iris.shaderpack.programs.ProgramSet programs) {
-        if (!DhPrototype.activeEnvironment()) return null;
+    public static IrisShaderPatch makePrototype(net.irisshaders.iris.shaderpack.programs.ProgramSet programs, String dimension) {
+        if (((IGetDhShaderEnvironment)programs.getPack()).voxy$getDhShaderEnvironment() == null) return null;
         DhPrototype.requireNoDh();
-        var prototype = DhPrototype.from(programs);
+        var prototype = DhPrototype.from(programs, dimension);
         var data = new PatchGson();
         data.opaqueDrawBuffers = prototype.terrain.getDirectives().getDrawBuffers();
         data.translucentDrawBuffers = prototype.water.getDirectives().getDrawBuffers();

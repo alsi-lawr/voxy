@@ -31,7 +31,8 @@ public final class DhPrototypeInputs {
     // DH 3.3.3 BlockStateWrapper's ordered classifier, not Iris's ordinary block IDs.
     public static int material(BlockState state) {
         if (state.isAir()) return 14;
-        String name = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().toLowerCase(Locale.ROOT);
+        String name = (BuiltInRegistries.BLOCK.getKey(state.getBlock()) + " " + state.getValues().entrySet().stream()
+                .map(entry -> entry.getKey().getName() + ":" + entry.getValue()).collect(java.util.stream.Collectors.joining(" "))).toLowerCase(Locale.ROOT);
         if (state.is(BlockTags.LEAVES) || name.contains("bamboo") || name.contains("cactus") || name.contains("chorus_flower") || name.contains("mushroom")) return 1;
         if (state.is(Blocks.LAVA)) return 6;
         if (!state.getFluidState().isEmpty() || state.is(Blocks.WATER)) return 12;

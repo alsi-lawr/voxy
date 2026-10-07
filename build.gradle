@@ -198,3 +198,15 @@ tasks.register('dhPrototypeNativePack', Zip) {
     destinationDirectory = layout.buildDirectory.dir('dh-prototype-fixtures')
     archiveFileName = 'voxy-003-identity-native.zip'
 }
+
+tasks.register('dhTranslationTest', JavaExec) {
+    dependsOn testClasses
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
+    classpath = sourceSets.test.runtimeClasspath + sourceSets.main.compileClasspath
+    mainClass = 'me.cortex.voxy.client.iris.DhTranslationTest'
+    if (project.hasProperty('dhTranslationOutput')) {
+        args project.property('dhTranslationOutput')
+        if (project.hasProperty('dhTranslationCorpus')) args project.property('dhTranslationCorpus')
+    }
+}
+tasks.named('check') { dependsOn 'dhTranslationTest' }

@@ -65,9 +65,13 @@ public class ModelFactory {
 
     //TODO: replace the fluid BlockState with a client model id integer of the fluidState, requires looking up
     // the fluid state in the mipper
-    private record ModelEntry(ColourDepthTextureData down, ColourDepthTextureData up, ColourDepthTextureData north, ColourDepthTextureData south, ColourDepthTextureData west, ColourDepthTextureData east, int fluidBlockStateId, int tintingColour) {
-        public ModelEntry(ColourDepthTextureData[] textures, int fluidBlockStateId, int tintingColour) {
-            this(textures[0], textures[1], textures[2], textures[3], textures[4], textures[5], fluidBlockStateId, tintingColour);
+    private volatile boolean dhInputMapping;
+
+    public void enableDhInputMapping() { this.dhInputMapping = true; }
+
+    private record ModelEntry(ColourDepthTextureData down, ColourDepthTextureData up, ColourDepthTextureData north, ColourDepthTextureData south, ColourDepthTextureData west, ColourDepthTextureData east, int fluidBlockStateId, int tintingColour, int dhMaterialId) {
+        public ModelEntry(ColourDepthTextureData[] textures, int fluidBlockStateId, int tintingColour, int dhMaterialId) {
+            this(textures[0], textures[1], textures[2], textures[3], textures[4], textures[5], fluidBlockStateId, tintingColour, dhMaterialId);
         }
     }
 
@@ -433,9 +437,11 @@ public class ModelFactory {
             isBiomeColourDependent = isBiomeDependentColour(tintSources, blockState);
         }
 
+        boolean dhInputs = this.dhInputMapping;
+        int dhMaterialId = dhInputs ? me.cortex.voxy.client.iris.DhPrototypeInputs.material(blockState) : 0;
         ModelEntry entry;
         {//Deduplicate same entries
-            entry = new ModelEntry(textureData, clientFluidStateId, isBiomeColourDependent||tintSources==null?-1:captureColourConstant(tintSources, blockState, DEFAULT_BIOME)|0xFF000000);
+            entry = new ModelEntry(textureData, clientFluidStateId, isBiomeColourDependent||tintSources==null?-1:captureColourConstant(tintSources, blockState, DEFAULT_BIOME)|0xFF000000, dhMaterialId);
             int possibleDuplicate = this.modelTexture2id.getInt(entry);
             if (possibleDuplicate != -1) {//Duplicate found
                 this.idMappings[blockId] = possibleDuplicate;
@@ -679,11 +685,11 @@ public class ModelFactory {
         } uploadPtr += 4;
 
 
-        if (me.cortex.voxy.client.core.util.IrisUtil.IRIS_INSTALLED && me.cortex.voxy.client.iris.DhPrototype.activeEnvironment()) {
+        if (dhInputs) {
             for (int face = 0; face < 6; face++) {
                 MemoryUtil.memPutInt(uploadPtr + face * 4L, me.cortex.voxy.client.iris.DhPrototypeInputs.faceColour(textureData[face]));
             }
-            MemoryUtil.memPutInt(uploadPtr + 24, me.cortex.voxy.client.iris.DhPrototypeInputs.material(blockState));
+            MemoryUtil.memPutInt(uploadPtr + 24, dhMaterialId);
         }
 
         //Note: if the layer isSolid then need to fill all the points in the texture where alpha == 0 with the average colour

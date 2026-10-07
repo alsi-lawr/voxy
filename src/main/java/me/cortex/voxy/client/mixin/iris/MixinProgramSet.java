@@ -24,10 +24,13 @@ public class MixinProgramSet implements IGetVoxyPatchData {
     @Shadow @Final private PackDirectives packDirectives;
     @Unique IrisShaderPatch patchData;
     @Unique private boolean voxy$prototypeEligible;
+    @Unique private String voxy$dimension;
+    @Unique private me.cortex.voxy.client.iris.DhTranslationFailure voxy$failure;
 
     @Inject(method = "<init>", at = @At(value = "INVOKE", target = "Lnet/irisshaders/iris/shaderpack/programs/ProgramSet;locateDirectives()V", shift = At.Shift.BEFORE))
     private void voxy$injectPatchMaker(AbsolutePackPath directory, Function<AbsolutePackPath, String> sourceProvider, ShaderProperties shaderProperties, ShaderPack pack, CallbackInfo ci) {
         if (VoxyConfig.CONFIG.isRenderingEnabled() && IrisUtil.SHADER_SUPPORT) {
+            this.voxy$dimension = directory.toString();
             this.patchData = IrisShaderPatch.makePatch(pack, directory, sourceProvider);
             this.voxy$prototypeEligible = this.patchData == null && sourceProvider.apply(directory.resolve("voxy.json")) == null;
         }
@@ -50,7 +53,9 @@ public class MixinProgramSet implements IGetVoxyPatchData {
     public IrisShaderPatch voxy$getPatchData() {
         // Iris constructs an unused base before selecting a dimension override for the pipeline.
         if (this.patchData == null && this.voxy$prototypeEligible) {
-            this.patchData = IrisShaderPatch.makePrototype((ProgramSet)(Object)this);
+            if (this.voxy$failure != null) throw this.voxy$failure;
+            try { this.patchData = IrisShaderPatch.makePrototype((ProgramSet)(Object)this, this.voxy$dimension); }
+            catch (me.cortex.voxy.client.iris.DhTranslationFailure failure) { this.voxy$failure = failure; throw failure; }
         }
         return this.patchData;
     }

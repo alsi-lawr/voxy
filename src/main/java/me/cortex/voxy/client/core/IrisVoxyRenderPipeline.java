@@ -83,6 +83,7 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
     @Override
     public void setupExtraModelBakeryData(ModelBakerySubsystem modelService) {
         modelService.factory.setCustomBlockStateMapping(WorldRenderingSettings.INSTANCE.getBlockStateIds());
+        if (this.data.prototype != null) modelService.factory.enableDhInputMapping();
     }
 
     @Override
