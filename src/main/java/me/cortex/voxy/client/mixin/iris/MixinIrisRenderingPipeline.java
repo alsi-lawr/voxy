@@ -34,6 +34,14 @@ public class MixinIrisRenderingPipeline implements IGetVoxyPatchData, IGetIrisVo
         }
     }
 
+    @Inject(method = "<init>", at = @At(value = "FIELD", target = "Lnet/irisshaders/iris/pipeline/IrisRenderingPipeline;shadowTargetsSupplier:Ljava/util/function/Supplier;", opcode = 181, shift = At.Shift.AFTER))
+    private void voxy$requireAuthoredShadowTargets(ProgramSet programSet, CallbackInfo ci) {
+        if (patchData != null && patchData.prototype != null && patchData.prototype.shadowEnabled()) {
+            // Use Iris' own lazy target owner before it assembles shadow clears and its renderer.
+            ((IrisRenderingPipelineAccessor)(Object)this).getShadowTargetsSupplier().get();
+        }
+    }
+
     @Inject(method = "<init>", at = @At(value = "INVOKE", target = "Lnet/irisshaders/iris/pipeline/IrisRenderingPipeline;createSetupComputes([Lnet/irisshaders/iris/shaderpack/programs/ComputeSource;Lnet/irisshaders/iris/shaderpack/programs/ProgramSet;Lnet/irisshaders/iris/shaderpack/texture/TextureStage;)[Lnet/irisshaders/iris/gl/program/ComputeProgram;"))
     private void voxy$injectPipeline(ProgramSet programSet, CallbackInfo ci) {
         if (this.patchData != null) {
@@ -46,7 +54,10 @@ public class MixinIrisRenderingPipeline implements IGetVoxyPatchData, IGetIrisVo
         if (IrisUtil.CAPTURED_VIEWPORT_PARAMETERS != null) {
             var renderer = IVoxyRenderSystemHolder.getNullable();
             if (renderer != null) {
-                IrisUtil.CAPTURED_VIEWPORT_PARAMETERS.apply(renderer);
+                var viewport = IrisUtil.CAPTURED_VIEWPORT_PARAMETERS.apply(renderer);
+                if (viewport != null && this.pipeline != null && this.pipeline.prototype != null) {
+                    this.pipeline.prototype.beginFrame(viewport);
+                }
                 IrisUtil.CAPTURED_VIEWPORT_PARAMETERS = null;
                 IrisUtil.USED_IRIS_VIEWPORT = true;
             }

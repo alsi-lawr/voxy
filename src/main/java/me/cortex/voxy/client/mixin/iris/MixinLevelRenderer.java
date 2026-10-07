@@ -4,6 +4,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import me.cortex.voxy.client.core.IVoxyRenderSystemHolder;
 import me.cortex.voxy.client.core.rendering.FogParameters;
 import me.cortex.voxy.client.core.util.IrisUtil;
+import me.cortex.voxy.client.core.rendering.Viewport;
 import me.jellysquid.mods.sodium.client.render.chunk.ChunkRenderMatrices;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
@@ -33,4 +34,25 @@ public class MixinLevelRenderer {
                 target.width, target.height, pos.x, pos.y, pos.z);
         }
     }
+    @Inject(method = "renderChunkLayer", at = @At("HEAD"))
+    private void voxy$renderDhStage(net.minecraft.client.renderer.RenderType layer, PoseStack poseStack,
+            double x, double y, double z, Matrix4f projection, CallbackInfo ci) {
+        var renderer = IVoxyRenderSystemHolder.getNullable();
+        if (renderer == null || renderer.getDhPrototype() == null) return;
+        boolean water = layer == net.minecraft.client.renderer.RenderType.translucent();
+        if (!water && layer != net.minecraft.client.renderer.RenderType.solid()) return;
+        var target = Minecraft.getInstance().getMainRenderTarget();
+        Viewport<?> viewport;
+        if (IrisUtil.irisShadowActive()) return;
+        viewport = renderer.getViewport();
+        if (!water && !IrisUtil.USED_IRIS_VIEWPORT) {
+            viewport = renderer.setupViewport(projection, poseStack.last().pose(), FogParameters.current,
+                    target.width, target.height, x, y, z);
+            if (viewport != null) renderer.getDhPrototype().beginFrame(viewport);
+        }
+        if (!water) IrisUtil.USED_IRIS_VIEWPORT = false;
+        if (water) renderer.renderDhWater(viewport, target.getDepthTextureId(), target.getColorTextureId());
+        else renderer.renderOpaque(viewport, target.getDepthTextureId(), target.getColorTextureId());
+    }
+
 }

@@ -3,7 +3,6 @@ package me.cortex.voxy.client.iris;
 import com.google.common.collect.ImmutableList;
 import me.cortex.voxy.client.core.IrisVoxyRenderPipeline;
 import me.cortex.voxy.client.core.rendering.Viewport;
-import net.fabricmc.loader.api.FabricLoader;
 import net.irisshaders.iris.helpers.StringPair;
 import net.irisshaders.iris.helpers.Tri;
 import net.irisshaders.iris.gl.texture.TextureType;
@@ -33,6 +32,12 @@ public final class DhPrototype {
     private final String dimension;
     public final ProgramSource terrain;
     public final ProgramSource water;
+    public final ProgramSource shadow;
+    private final boolean shadowEnabled;
+    public final DhFrameState frameState = new DhFrameState();
+    private Stages shadowStages;
+    private DhPrototypeProgram shadowProgram;
+    private net.irisshaders.iris.gl.framebuffer.GlFramebuffer shadowFramebuffer;
     public IrisVoxyRenderPipeline owner;
     private IrisRenderingPipeline pipeline;
     private CustomUniforms uniforms;
@@ -41,9 +46,23 @@ public final class DhPrototype {
     private String receipt;
     private Stages terrainStages;
     private Stages waterStages;
+    private boolean shadowSubmitted;
+    private boolean shadowWaterSubmitted;
+    private int frameReceipts;
+    private static final boolean FRAME_RECEIPTS = Boolean.getBoolean("voxy.dhPrototype.frameReceipts");
     private final boolean[] submitted = new boolean[2];
 
     DhPrototype(ProgramSource terrain, ProgramSource water, DhShaderEnvironment environment, String dimension) {
+        this(terrain, water, null, environment, dimension);
+    }
+
+    DhPrototype(ProgramSource terrain, ProgramSource water, ProgramSource shadow, DhShaderEnvironment environment, String dimension) {
+        this(terrain, water, shadow, environment, dimension, shadow != null);
+    }
+
+    DhPrototype(ProgramSource terrain, ProgramSource water, ProgramSource shadow, DhShaderEnvironment environment, String dimension, boolean shadowEnabled) {
+        this.shadow = shadow;
+        this.shadowEnabled = shadowEnabled;
         this.environment = environment;
         this.dimension = dimension;
         this.terrain = terrain;
@@ -55,10 +74,10 @@ public final class DhPrototype {
     public static DhShaderEnvironment loadedEnvironment() { return loadedEnvironment; }
 
     public static void requireNoDh() {
-        if (FabricLoader.getInstance().isModLoaded("distanthorizons")) {
+        if (me.cortex.voxy.client.core.util.LodRenderOwnership.dhActive()) {
             throw new DhTranslationFailure(DhTranslationFailure.Code.LOD_ENGINE_CONFLICT,
                     loadedEnvironment == null ? "loading" : loadedEnvironment.pack(), "loading", "adapter",
-                    "Distant Horizons is installed; concurrent LOD rendering is not supported", null);
+                    "Distant Horizons rendering is active; select only one LOD renderer", null);
         }
     }
 
@@ -98,18 +117,18 @@ public final class DhPrototype {
         if (environment == null) throw new IllegalStateException("DH source environment was not captured for this shader pack");
         var terrain = required(set, ProgramId.DhTerrain, environment, dimension);
         var water = required(set, ProgramId.DhWater, environment, dimension);
-        var probe = new DhPrototype(terrain, water, environment, dimension);
-        if (set.get(ProgramId.DhShadow).isPresent()) {
-            throw new DhTranslationFailure(DhTranslationFailure.Code.SHADOW_PASS_UNAVAILABLE, environment.pack(), dimension,
-                    "dh_shadow", "authored DH shadows require the pending shadow pass integration; no shadowless substitute", null);
-        }
+        var shadow = set.get(ProgramId.DhShadow).orElse(null);
+        boolean shadowEnabled = shadow != null && set.getPackDirectives().getShadowDirectives().isDhShadowEnabled().orElse(false)
+                && set.getPackDirectives().getShadowDirectives().isShadowEnabled().orElse(true);
+        var probe = new DhPrototype(terrain, water, shadow, environment, dimension, shadowEnabled);
         probe.receipt = DhShaderEnvironment.fingerprint(java.util.List.of(environment.identity(), dimension,
                 terrain.getVertexSource().orElseThrow(), terrain.getFragmentSource().orElseThrow(),
                 water.getVertexSource().orElseThrow(), water.getFragmentSource().orElseThrow()));
         probe.recordSource(terrain);
         probe.recordSource(water);
+        if (probe.shadow != null) probe.recordSource(probe.shadow);
         write(probe.receipt + "-features.txt", "dh_shadow=" + set.get(ProgramId.DhShadow).isPresent()
-                + "\nprototypePasses=terrain,water only; shadow feasibility NOT established\nmodelUploadStride=64; prototype uses unused bytes36..63; no extra atlas/depth allocation\n"
+                + "\ndh_shadow_enabled=" + probe.shadowEnabled + "\nadapterPasses=terrain,water,authored shadow when selected\nmodelUploadStride=64; adapter inputs occupy bytes36..63; two existing main D24S8 attachments plus optional shadow viewport; no extra atlas\n"
                 + "inputColor=per-face stencil-covered average of existing captured RGBA; partial tint approximation\n"
                 + "exact block atlas and ordinary customId retained; full texture fidelity NOT established by DH flat-color inputs\n");
         return probe;
@@ -144,10 +163,11 @@ public final class DhPrototype {
         var water = translate(this.water, textures);
         this.terrainStages = terrain;
         this.waterStages = water;
+        if (shadow != null) this.shadowStages = translate(shadow, textures);
     }
 
     private Stages translate(ProgramSource source, Map<Tri<String, TextureType, TextureStage>, String> textures) {
-        if (!MODE.equals("pack")) source = DhPrototypeFixtures.source(MODE, source);
+        if (!MODE.equals("pack") && source != shadow) source = DhPrototypeFixtures.source(MODE, source);
         long start = System.nanoTime();
         var key = new DhTranslationCache.Key(environment.identity(), dimension, source.getName(),
                 DhTranslationCache.Source.from(source), textures);
@@ -161,35 +181,85 @@ public final class DhPrototype {
         return new Stages(stages.vertex(), stages.fragment());
     }
 
-    public void attach(int terrainId, int waterId, long compileNanos) {
-        opaqueProgram = new DhPrototypeProgram(terrainId, terrain, pipeline, uniforms, false);
-        waterProgram = new DhPrototypeProgram(waterId, water, pipeline, uniforms, true);
-        write(receipt + "-link.txt", "terrain=" + terrainId + " water=" + waterId + " linked by Voxy Shader.compile\ncompileNanos=" + compileNanos + "\n");
+    public boolean shadowEnabled() { return shadowEnabled; }
+    public Stages shadowStages() { return shadowEnabled ? shadowStages : null; }
+
+    public void beginFrame(Viewport<?> viewport) {
+        frameState.update(viewport.frameId, viewport.width, viewport.height, viewport.cameraX, viewport.cameraY, viewport.cameraZ, viewport.projection);
+        if (FRAME_RECEIPTS && frameReceipts < 64 && (frameReceipts < 8 || frameState.historyReset)) {
+            write(receipt + "-frame-" + frameReceipts++ + ".txt", "dimension=" + dimension + "\nframe=" + viewport.frameId
+                    + "\nsize=" + viewport.width + "x" + viewport.height + "\ncamera=" + viewport.cameraX + "," + viewport.cameraY + "," + viewport.cameraZ
+                    + "\nhistoryReset=" + frameState.historyReset + "\nhistoryResetReason=" + frameState.resetReason + "\nnear=" + frameState.projection.perspectiveNear()
+                    + "\nfar=" + frameState.projection.perspectiveFar() + "\nrenderDistanceBlocks=" + Math.round(me.cortex.voxy.client.config.VoxyConfig.CONFIG.sectionRenderDistance * 512)
+                    + "\nprojection=" + frameState.projection + "\ninverse=" + frameState.inverseProjection + "\nprevious=" + frameState.previousProjection);
+        }
+    }
+
+    public void attach(int terrainId, int waterId, int shadowId, long compileNanos) {
+        opaqueProgram = new DhPrototypeProgram(terrainId, terrain, pipeline, uniforms, false, false);
+        waterProgram = new DhPrototypeProgram(waterId, water, pipeline, uniforms, true, false);
+        if (shadowId != 0) {
+            shadowProgram = new DhPrototypeProgram(shadowId, shadow, pipeline, uniforms, false, true);
+            shadowFramebuffer = pipeline.createDHFramebufferShadow(shadow);
+        }
+        write(receipt + "-link.txt", "terrain=" + terrainId + " water=" + waterId + " shadow=" + shadowId + " shadowEnabled=" + shadowEnabled + " linked by Voxy Shader.compile\ncompileNanos=" + compileNanos + "\n");
     }
 
     public void bind(boolean translucent, Viewport<?> viewport) {
-        requireNoDh();
-        (translucent ? waterProgram : opaqueProgram).bind(viewport);
+        (me.cortex.voxy.client.core.util.IrisUtil.irisShadowActive() ? shadowProgram : translucent ? waterProgram : opaqueProgram).bind(viewport, frameState);
     }
 
+    public net.irisshaders.iris.gl.framebuffer.GlFramebuffer shadowFramebuffer() { return shadowFramebuffer; }
+
     public void recordSubmission(boolean translucent, Viewport<?> viewport) {
+        if (me.cortex.voxy.client.core.util.IrisUtil.irisShadowActive()) {
+            if (translucent ? !shadowWaterSubmitted : !shadowSubmitted) {
+                if (translucent) shadowWaterSubmitted = true; else shadowSubmitted = true;
+                write(receipt + (translucent ? "-shadow-water-submission.txt" : "-shadow-submission.txt"), "projection=" + viewport.projection + "\nmodelView=" + viewport.modelView + "\nsize=" + viewport.width + "x" + viewport.height + "\nplacement=" + (translucent ? "after Iris shadow opaque depthcopy; before normal shadow translucent" : "before normal shadow terrain") + "; GPU traversal/cull/MDI\n" + shadowProgram.resourceBindings()
+                        + shadowTargetInventory() + "shadowViewportBuffersBytes=" + shadowViewportBytes(viewport) + "\n"
+                        + "shadowBoundingDepthBytes=" + (4L * viewport.width * viewport.height) + "\n"
+                        + "shadowHiZLogicalBytesUpperBound=" + (16L * Integer.highestOneBit(viewport.width) * Integer.highestOneBit(viewport.height) / 3) + "\n");
+            }
+            return;
+        }
         int slot = translucent ? 1 : 0;
         if (submitted[slot]) return;
         submitted[slot] = true;
         write(receipt + "-" + (translucent ? "water" : "terrain") + "-submission.txt", "mode=" + MODE
                 + "\nframe=" + viewport.frameId + "\nsize=" + viewport.width + "x" + viewport.height
                 + "\nopaqueDepth=" + owner.fb.getDepthTex().id + "\nwaterDepth=" + owner.fbTranslucent.getDepthTex().id
+                + "\nmainDhDepthLogicalBytes=" + (8L * viewport.width * viewport.height)
+                + "\nmandatoryWaterDepthCopyBytesReadPlusWrite=" + (8L * viewport.width * viewport.height)
                 + "\nopaqueTargets=" + java.util.Arrays.toString(owner._getData().opaqueDrawTargets)
                 + "\nwaterTargets=" + java.util.Arrays.toString(owner._getData().translucentDrawTargets)
-                + "\nplacement=immediate Voxy water after opaque; NOT Iris post-translucent DH placement"
+                + "\nplacement=terrain before normal SOLID; water before normal TRANSLUCENT, after Iris deferred"
                 + "\nirisPhase=" + pipeline.getPhase()
-                + "\nsamplerFlipSupplier=getFlippedAfterPrepare; attachmentFlipSet=getFlippedAfterPrepare"
+                + "\nsampler/attachment terrain=getFlippedAfterPrepare; water=getFlippedAfterTranslucent"
                 + "\nprepareFlips=" + pipeline.getFlippedAfterPrepare() + "\nafterTranslucentFlips=" + pipeline.getFlippedAfterTranslucent()
-                + "\nwaterDhDepthMeaning=completed opaque fb for dhDepthTex/0/1; water-inclusive reference semantics NOT established"
+                + "\nwaterDhDepthMeaning=completed opaque fb for dhDepthTex/0/1; pass-entry opaque snapshot (distinct from written depth)"
                 + "\nlaterIrisDhDepthMeaning=dhDepthTex/0 final fbTranslucent; dhDepthTex1 opaque fb\n"
                 + (translucent ? waterProgram : opaqueProgram).resourceBindings() + targetInventory()
                 + "\nprojection=" + viewport.projection + "\nmodelView=" + viewport.modelView
                 + "\nsubmitted=glMultiDrawElementsIndirectCountARB; execution/visual/cost acceptance NOT inferred\n");
+    }
+
+    private String shadowTargetInventory() {
+        var targets = ((IrisRenderingPipelineAccessor)pipeline).getShadowRenderTargets();
+        var inventory = new StringBuilder("irisOwnedShadowDepth=" + targets.getDepthTexture().getTextureId()
+                + "\nirisOwnedShadowOpaqueDepth=" + targets.getDepthTextureNoTranslucents().getTextureId() + "\n");
+        for (int i = 0; i < targets.getRenderTargetCount(); i++) {
+            var target = targets.get(i);
+            if (target != null) inventory.append("irisOwnedShadowColor=").append(i).append(" main=").append(target.getMainTexture())
+                    .append(" alt=").append(target.getAltTexture()).append(" format=").append(target.getInternalFormat())
+                    .append(" size=").append(target.getWidth()).append('x').append(target.getHeight()).append('\n');
+        }
+        return inventory.toString();
+    }
+
+    private static long shadowViewportBytes(Viewport<?> viewport) {
+        var mdic = (me.cortex.voxy.client.core.rendering.section.backend.mdic.MDICViewport)viewport;
+        return mdic.drawCountCallBuffer.size() + mdic.drawCallBuffer.size() + mdic.positionScratchBuffer.size()
+                + mdic.indirectLookupBuffer.size() + mdic.visibilityBuffer.size();
     }
 
     private String targetInventory() {
@@ -209,6 +279,8 @@ public final class DhPrototype {
         owner = null;
         opaqueProgram = null;
         waterProgram = null;
+        shadowProgram = null;
+        shadowFramebuffer = null;
     }
 
     static void write(String file, String contents) {

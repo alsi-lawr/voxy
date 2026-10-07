@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public final class DhTranslationTest {
     public static void main(String[] args) throws Exception {
+        frameHistory();
         cacheIdentityAndIsolation();
         failureReuse();
         faceInputs();
@@ -41,6 +42,29 @@ public final class DhTranslationTest {
             }
         }
         System.out.println("DH selected preflight, provider-origin failure reuse, immutable cache identity/isolation and unsigned face input checks passed.");
+    }
+
+    private static void frameHistory() {
+        var state = new DhFrameState();
+        var first = new org.joml.Matrix4f().perspective(1f, 1.8f, 16f, 8192f);
+        var second = new org.joml.Matrix4f().perspective(.9f, 1.8f, 16f, 8192f);
+        state.update(1, 1600, 900, 0, 64, 0, first);
+        require(state.previousProjection.equals(first), "First frame has no stale history");
+        state.update(2, 1600, 900, 1, 64, 0, second);
+        require(state.previousProjection.equals(first) && state.projection.equals(second), "Current and previous frame remain coherent");
+        state.update(2, 1600, 900, 1, 64, 0, first);
+        require(state.previousProjection.equals(first) && state.projection.equals(second), "Repeated pass cannot advance or overwrite frame history");
+        var identity = new org.joml.Matrix4f(state.projection).mul(state.inverseProjection);
+        require(identity.equals(new org.joml.Matrix4f(), .001f), "Inverse belongs to the same frame");
+        state.update(3, 1280, 720, 1, 64, 0, second);
+        require(state.previousProjection.equals(second) && state.resetReason.equals("resize"), "Resize resets history");
+        state.update(4, 1280, 720, 1024, 64, 0, first);
+        require(state.previousProjection.equals(first) && state.resetReason.equals("camera_discontinuity"), "Teleport resets history");
+        state.update(7, 1280, 720, 1024, 64, 0, second);
+        require(state.previousProjection.equals(second) && state.resetReason.equals("frame_gap"), "Missing render frames reset history");
+        state.reset();
+        state.update(7, 1280, 720, 1024, 64, 0, first);
+        require(state.previousProjection.equals(first) && state.resetReason.equals("renderer_owner"), "New dimension/renderer owner resets even a reused frame ID");
     }
 
     private static void selectedPreflight(Path scratch) throws Exception {
@@ -78,6 +102,23 @@ public final class DhTranslationTest {
                 if (first == null) first = failure;
                 else require(first == failure, "Repeated preflight must reuse its owned failure");
             }
+        }
+        var authoredShadow = program("dh_shadow", new DhPrototypeTransform.Stages(
+                "#version 330 compatibility\nvoid main() { gl_Position=ftransform(); }\n",
+                "#version 330 compatibility\n/* DRAWBUFFERS:01 */\nvoid main() { gl_FragData[0]=vec4(0,1,0,1); gl_FragData[1]=vec4(0); }\n"));
+        var shadowed = new DhPrototype(terrain, water, authoredShadow, environment, "/world0");
+        shadowed.prepareStages(Map.of());
+        var shadowKey = new DhTranslationCache.Key(environment.identity(), "/world0", "dh_shadow", DhTranslationCache.Source.from(authoredShadow), Map.of());
+        var cachedShadow = environment.translations().get(shadowKey, () -> { throw new AssertionError("Shadow escaped selected load-time caching"); });
+        require(shadowed.shadowStages().vertex() == cachedShadow.vertex(), "Shadow renderer uses lowered selected source without late translation");
+        var disabledShadow = new DhPrototype(terrain, water, authoredShadow, environment, "/world0", false);
+        disabledShadow.prepareStages(Map.of());
+        require(disabledShadow.shadowStages() == null, "Disabled authored shadow has no renderer stages or late compilation");
+        var badShadow = new DhPrototype(terrain, water, program("dh_shadow", unsupportedInput(fixture)), environment, "/world0");
+        try { badShadow.prepareStages(Map.of()); throw new AssertionError("Unsupported shadow escaped load preflight"); }
+        catch (DhTranslationFailure failure) {
+            require(failure.program().equals("dh_shadow") && failure.code() == DhTranslationFailure.Code.UNSUPPORTED_VERTEX_INPUT,
+                    "Owned shadow failure identifies the selected program");
         }
         System.out.println("Both selected sources cached before renderer access; unsupported water rejects during preflight and reuses the same failure.");
     }
@@ -206,6 +247,15 @@ public final class DhTranslationTest {
         for (var mode : List.of("inputs", "light", "material")) {
             var stages = DhPrototypeFixtures.stages(mode);
             write(output, mode, DhPrototypeTransform.transform("dh_terrain", stages.vertex(), stages.fragment(), new Object2ObjectOpenHashMap<>()));
+        }
+        Path shadowRoot = Path.of("src/test/resources/dh-frame-shadow/shaders");
+        for (var program : List.of("dh_terrain", "dh_water", "dh_shadow")) {
+            var vertexEntry = AbsolutePackPath.fromAbsolutePath("/" + program + ".vsh");
+            var fragmentEntry = AbsolutePackPath.fromAbsolutePath("/" + program + ".fsh");
+            var includes = new IncludeProcessor(new IncludeGraph(shadowRoot, ImmutableList.of(vertexEntry, fragmentEntry)));
+            String v = JcppProcessor.glslPreprocessSource(String.join("\n", includes.getIncludedFile(vertexEntry)), List.of());
+            String f = JcppProcessor.glslPreprocessSource(String.join("\n", includes.getIncludedFile(fragmentEntry)), List.of());
+            write(output, "frame-shadow-" + program, DhPrototypeTransform.transform(program, v, f, new Object2ObjectOpenHashMap<>()));
         }
         var cache = new DhTranslationCache();
         for (var bad : List.of("attribute vec3 unsupported; vec3 readInput() { return unsupported; }", "vec3 _vert_position;", "layout(std430, binding=1) buffer User { float value; };")) {

@@ -48,9 +48,8 @@ public abstract class MixinDefaultChunkRenderer extends ShaderChunkRenderer {
 
     @Unique
     private void doRender(ChunkRenderMatrices matrices, TerrainRenderPass renderPass, CameraTransform camera) {
-        if (renderPass != DefaultTerrainRenderPasses.CUTOUT) return;
         var renderer = IVoxyRenderSystemHolder.getNullable();
-        if (renderer == null) return;
+        if (renderer == null || renderer.getDhPrototype() != null || renderPass != DefaultTerrainRenderPasses.CUTOUT) return;
         var target = Minecraft.getInstance().getMainRenderTarget();
         Viewport<?> viewport;
         if (IrisUtil.USED_IRIS_VIEWPORT) {

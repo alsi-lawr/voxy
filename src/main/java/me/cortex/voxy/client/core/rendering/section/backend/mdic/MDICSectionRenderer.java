@@ -12,6 +12,7 @@ import me.cortex.voxy.client.core.gl.shader.ShaderLoader;
 import me.cortex.voxy.client.core.gl.shader.ShaderType;
 import me.cortex.voxy.client.core.model.ModelStore;
 import me.cortex.voxy.client.core.rendering.section.backend.AbstractSectionRenderer;
+import me.cortex.voxy.client.core.rendering.Viewport;
 import me.cortex.voxy.client.core.rendering.section.geometry.BasicSectionGeometryData;
 import me.cortex.voxy.client.core.rendering.util.DownloadStream;
 import me.cortex.voxy.client.core.rendering.util.LightMapHelper;
@@ -53,18 +54,11 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
     private static final int STATISTICS_BUFFER_BINDING = 8;
     private final Shader terrainShader;
     private final Shader translucentTerrainShader;
+    private final Shader shadowShader;
+    private final Matrix4f shadowViewInverse = new Matrix4f();
 
-    private final Shader commandGenShader = Shader.make()
-            .define("TRANSLUCENT_WRITE_BASE", 1024)
-            .define("TEMPORAL_OFFSET", TEMPORAL_OFFSET)
-
-            .define("TRANSLUCENT_DISTANCE_BUFFER_BINDING", 7)
-
-            .defineIf("HAS_STATISTICS", RenderStatistics.enabled)
-            .defineIf("STATISTICS_BUFFER_BINDING", RenderStatistics.enabled, STATISTICS_BUFFER_BINDING)
-
-            .add(ShaderType.COMPUTE, "voxy:lod/gl46/cmdgen.comp")
-            .compile();
+    private final Shader commandGenShader;
+    private final boolean hasShadowCommands;
 
     private final Shader prepShader = Shader.make()
             .add(ShaderType.COMPUTE, "voxy:lod/gl46/prep.comp")
@@ -101,14 +95,31 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         //The pipeline can be used to transform the renderer in abstract ways
 
         var prototype = pipeline instanceof me.cortex.voxy.client.core.IrisVoxyRenderPipeline iris ? iris._getData().prototype : null;
+        this.hasShadowCommands = prototype != null && prototype.shadowEnabled();
+        this.commandGenShader = Shader.make()
+            .defineIf("DH_SHADOW_COMMANDS", hasShadowCommands)
+            .define("TRANSLUCENT_WRITE_BASE", 1024)
+            .define("TEMPORAL_OFFSET", TEMPORAL_OFFSET)
+
+            .define("TRANSLUCENT_DISTANCE_BUFFER_BINDING", 7)
+
+            .defineIf("HAS_STATISTICS", RenderStatistics.enabled)
+            .defineIf("STATISTICS_BUFFER_BINDING", RenderStatistics.enabled, STATISTICS_BUFFER_BINDING)
+
+            .add(ShaderType.COMPUTE, "voxy:lod/gl46/cmdgen.comp")
+            .compile();
+
         if (prototype != null) {
             var terrain = prototype.stages(false);
             var water = prototype.stages(true);
             long compileStart = System.nanoTime();
             this.terrainShader = Shader.make().addSource(ShaderType.VERTEX, terrain.vertex()).addSource(ShaderType.FRAGMENT, terrain.fragment()).compile();
             this.translucentTerrainShader = Shader.make().addSource(ShaderType.VERTEX, water.vertex()).addSource(ShaderType.FRAGMENT, water.fragment()).compile();
-            prototype.attach(this.terrainShader.id(), this.translucentTerrainShader.id(), System.nanoTime() - compileStart);
+            var shadow = prototype.shadowStages();
+            this.shadowShader = shadow == null ? null : Shader.make().addSource(ShaderType.VERTEX, shadow.vertex()).addSource(ShaderType.FRAGMENT, shadow.fragment()).compile();
+            prototype.attach(this.terrainShader.id(), this.translucentTerrainShader.id(), shadowShader == null ? 0 : shadowShader.id(), System.nanoTime() - compileStart);
         } else {
+            this.shadowShader = null;
             String vertex = ShaderLoader.parse("voxy:lod/gl46/quads3.vert");
             String taa = pipeline.taaFunction("taaShift");
             if (taa != null) {
@@ -282,6 +293,29 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         glDisable(GL_BLEND);
     }
 
+    public void renderShadow(Viewport<?> viewport, boolean water) {
+        var mdic = (MDICViewport)viewport;
+        if (geometryManager.getSectionCount() == 0) return;
+        uploadUniformBuffer(mdic);
+        glDisable(GL_CULL_FACE);
+        glDisable(GL_BLEND);
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(properties.closerEqualDepthCompare());
+        shadowShader.bind();
+        glBindVertexArray(GlVertexArray.STATIC_VAO);
+        bindRenderingBuffers(mdic);
+        if (water) pipeline.setupAndBindTranslucent(mdic); else pipeline.setupAndBindOpaque(mdic);
+        LightMapHelper.bind(2);
+        glMemoryBarrier(GL_COMMAND_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT);
+        glProvokingVertex(GL_FIRST_VERTEX_CONVENTION);
+        glMultiDrawElementsIndirectCountARB(GL_TRIANGLES, GL_UNSIGNED_SHORT,
+                water ? TRANSLUCENT_OFFSET * 20L : 0L, water ? 16L : 12L,
+                water ? Math.min(geometryManager.getSectionCount(), TRANSLUCENT_DRAW_COUNT) : OPAQUE_DRAW_COUNT, 0);
+        ((me.cortex.voxy.client.core.IrisVoxyRenderPipeline)pipeline)._getData().prototype.recordSubmission(water, viewport);
+        glEnable(GL_CULL_FACE);
+        glBindVertexArray(0);
+    }
+
     @Override
     public void buildDrawCalls(MDICViewport viewport) {
         if (this.geometryManager.getSectionCount() == 0) return;
@@ -333,6 +367,18 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         {//Generate the commands
             this.distanceCountBuffer.zeroRange(0, 1024*4);
             this.commandGenShader.bind();
+            if (hasShadowCommands && me.cortex.voxy.client.core.util.IrisUtil.irisShadowActive()) {
+                glUniform3f(1, viewport.modelView.m02(), viewport.modelView.m12(), viewport.modelView.m22());
+                glUniform1i(2, 1);
+                boolean perspective = viewport.projection.m33() == 0;
+                glUniform1i(3, perspective ? 1 : 0);
+                if (perspective) {
+                    shadowViewInverse.set(viewport.modelView).invert();
+                    glUniform3f(4, shadowViewInverse.m30() + viewport.innerTranslation.x,
+                            shadowViewInverse.m31() + viewport.innerTranslation.y,
+                            shadowViewInverse.m32() + viewport.innerTranslation.z);
+                }
+            } else if (hasShadowCommands) glUniform1i(2, 0);
             glBindBufferBase(GL_UNIFORM_BUFFER, 0, this.uniform.id);
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, viewport.drawCallBuffer.id);
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, viewport.drawCountCallBuffer.id);
@@ -410,6 +456,7 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
 
     @Override
     public void free() {
+        if (shadowShader != null) shadowShader.free();
         this.uniform.free();
         this.distanceCountBuffer.free();
         this.translucentTerrainShader.free();

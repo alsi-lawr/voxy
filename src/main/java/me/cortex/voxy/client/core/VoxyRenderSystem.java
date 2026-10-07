@@ -209,7 +209,8 @@ public class VoxyRenderSystem {
                 farPlaneChunks = (VoxyConfig.CONFIG.sectionRenderDistance * 32 + 2) * ((float) Math.sqrt(3));
             }
         }
-        var voxyProjection = computeProjectionMat(this.properties, vanillaProjection, farPlaneChunks*16);
+        var voxyProjection = IrisUtil.irisShadowActive() && getDhPrototype() != null
+                ? new Matrix4f(vanillaProjection) : computeProjectionMat(this.properties, vanillaProjection, farPlaneChunks*16);
 
         /*
         int[] dims = new int[4];
@@ -248,7 +249,20 @@ public class VoxyRenderSystem {
     }
 
 
+    public me.cortex.voxy.client.iris.DhPrototype getDhPrototype() {
+        return pipeline instanceof IrisVoxyRenderPipeline iris ? iris._getData().prototype : null;
+    }
+
     public void renderOpaque(Viewport<?> viewport, int sourceDepthTexture, int sourceColourTexture) {
+        renderStage(viewport, sourceDepthTexture, sourceColourTexture, false);
+    }
+
+    public void renderDhWater(Viewport<?> viewport, int sourceDepthTexture, int sourceColourTexture) {
+        renderStage(viewport, sourceDepthTexture, sourceColourTexture, true);
+    }
+
+    private void renderStage(Viewport<?> viewport, int sourceDepthTexture, int sourceColourTexture, boolean water) {
+        if (me.cortex.voxy.client.core.util.LodRenderOwnership.suppressVoxyDraw()) return;
         if (viewport == null) {
             return;
         }
@@ -294,28 +308,36 @@ public class VoxyRenderSystem {
 
         this.pipeline.preSetup(viewport);
 
-        TimingStatistics.E.start();
-        if (this.visbleSectionStream != null && (!VoxyClient.disableSodiumChunkRender()) && !IrisUtil.irisShadowActive()) {
-            if (VoxyClient.isFrexActive()!=(this.columnStreamedBoundStore!=null)) {
-                if (this.columnStreamedBoundStore == null) {
-                    this.columnStreamedBoundStore = new ColumnStreamedBoundStore();
-                } else {
-                    this.columnStreamedBoundStore.free();
-                    this.columnStreamedBoundStore = null;
+        if (!water) {
+            TimingStatistics.E.start();
+            if (this.visbleSectionStream != null && (!VoxyClient.disableSodiumChunkRender()) && !IrisUtil.irisShadowActive()) {
+                if (VoxyClient.isFrexActive()!=(this.columnStreamedBoundStore!=null)) {
+                    if (this.columnStreamedBoundStore == null) {
+                        this.columnStreamedBoundStore = new ColumnStreamedBoundStore();
+                    } else {
+                        this.columnStreamedBoundStore.free();
+                        this.columnStreamedBoundStore = null;
+                    }
                 }
+                //viewport.depthBoundingBuffer.framebuffer.bind(GL_COLOR_ATTACHMENT0, sourceColourTexture).verify();
+                //If the bound renderer exists, it means we must be in FREX mode
+                this.boundOutlineRenderer.render(viewport, this.columnStreamedBoundStore==null?this.visbleSectionStream:this.columnStreamedBoundStore);
+            } else {
+                viewport.depthBoundingBuffer.clear(this.properties.inverseClearDepth());
             }
-            //viewport.depthBoundingBuffer.framebuffer.bind(GL_COLOR_ATTACHMENT0, sourceColourTexture).verify();
-            //If the bound renderer exists, it means we must be in FREX mode
-            this.boundOutlineRenderer.render(viewport, this.columnStreamedBoundStore==null?this.visbleSectionStream:this.columnStreamedBoundStore);
-        } else {
-            viewport.depthBoundingBuffer.clear(this.properties.inverseClearDepth());
+            TimingStatistics.E.stop();
         }
-        TimingStatistics.E.stop();
 
 
         GPUTiming.INSTANCE.marker();
         //The entire rendering pipeline (excluding the chunkbound thing)
-        this.pipeline.runPipeline(viewport, sourceDepthTexture, sourceColourTexture, scrWidth, scrHeight);
+        if (getDhPrototype() != null && IrisUtil.irisShadowActive()) {
+            ((IrisVoxyRenderPipeline)this.pipeline).runDhShadow(viewport, water);
+        } else if (water) {
+            ((IrisVoxyRenderPipeline)this.pipeline).runDhWater(viewport);
+        } else {
+            this.pipeline.runPipeline(viewport, sourceDepthTexture, sourceColourTexture, scrWidth, scrHeight);
+        }
         GPUTiming.INSTANCE.marker();
 
 
@@ -325,7 +347,7 @@ public class VoxyRenderSystem {
         PrintfDebugUtil.tick();
 
         //As much dynamic runtime stuff here
-        {
+        if (!water && !IrisUtil.irisShadowActive()) {
             //Tick upload stream (this is ok to do here as upload ticking is just memory management)
             UploadStream.INSTANCE.tick();
 
@@ -521,9 +543,7 @@ public class VoxyRenderSystem {
     }
 
     public Viewport<?> getViewport() {
-        if (IrisUtil.irisShadowActive()) {
-            return null;
-        }
+        if (IrisUtil.irisShadowActive() && (getDhPrototype() == null || !getDhPrototype().shadowEnabled())) return null;
         return this.viewportSelector.getViewport();
     }
 

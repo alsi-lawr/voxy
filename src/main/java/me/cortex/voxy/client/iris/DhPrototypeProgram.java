@@ -38,11 +38,8 @@ final class DhPrototypeProgram {
     private final float[] normalValues = new float[9];
     private final Map<String, Integer> locations = new LinkedHashMap<>();
     private final Map<String, Integer> samplerLocations = new LinkedHashMap<>();
-    private final Matrix4f previousProjection = new Matrix4f();
-    private final Matrix4f currentProjection = new Matrix4f();
-    private int frame = -1;
 
-    DhPrototypeProgram(int id, ProgramSource source, IrisRenderingPipeline pipeline, CustomUniforms customUniforms, boolean waterPass) {
+    DhPrototypeProgram(int id, ProgramSource source, IrisRenderingPipeline pipeline, CustomUniforms customUniforms, boolean waterPass, boolean shadowPass) {
         this.id = id;
         this.source = source;
         this.customUniforms = customUniforms;
@@ -71,8 +68,8 @@ final class DhPrototypeProgram {
         var samplerBuilder = ProgramSamplers.builder(id, ImmutableSet.of(0, 1, 2));
         var imageBuilder = ProgramImages.builder(id);
         // Water writes fbTranslucent: its original arbitrary-pixel DH reads must use completed opaque depth instead.
-        var passSamplers = waterPass ? VoxySamplers.waterDepthSamplers(samplerBuilder, () -> VoxySamplers.prototypeDepth(pipeline, true)) : samplerBuilder;
-        pipeline.addGbufferOrShadowSamplers(passSamplers, imageBuilder, pipeline::getFlippedAfterPrepare, false, false, true, false);
+        var passSamplers = VoxySamplers.waterDepthSamplers(samplerBuilder, () -> VoxySamplers.prototypeDepth(pipeline, waterPass));
+        pipeline.addGbufferOrShadowSamplers(passSamplers, imageBuilder, shadowPass ? pipeline::getFlippedBeforeShadow : waterPass ? pipeline::getFlippedAfterTranslucent : pipeline::getFlippedAfterPrepare, shadowPass, false, true, false);
         samplers = samplerBuilder.build();
         images = imageBuilder.build();
         try (var stack = MemoryStack.stackPush()) {
@@ -117,29 +114,25 @@ final class DhPrototypeProgram {
         return receipt.toString();
     }
 
-    void bind(Viewport<?> viewport) {
+    void bind(Viewport<?> viewport, DhFrameState state) {
         glUseProgram(id);
         samplers.update();
         uniforms.update();
         customUniforms.push(this);
         images.update();
-        if (frame != viewport.frameId) {
-            previousProjection.set(frame < 0 ? viewport.projection : currentProjection);
-            currentProjection.set(viewport.projection);
-            frame = viewport.frameId;
-        }
         matrix("iris_ProjectionMatrix", viewport.projection);
         matrix("iris_ProjectionMatrixInverse", inverse.set(viewport.projection).invert());
         matrix("iris_ModelViewMatrix", viewport.modelView);
         matrix("iris_ModelViewMatrixInverse", inverse.set(viewport.modelView).invert());
-        matrix("dhProjection", viewport.projection);
-        matrix("dhProjectionInverse", inverse.set(viewport.projection).invert());
-        matrix("dhPreviousProjection", previousProjection);
+        matrix("dhProjection", state.projection);
+        matrix("dhProjectionInverse", state.inverseProjection);
+        matrix("dhPreviousProjection", state.previousProjection);
         int normal = locations.get("iris_NormalMatrix");
         if (normal >= 0) glUniformMatrix3fv(normal, false, normalMatrix.set(viewport.modelView).invert().transpose().get(normalValues));
-        glUniform1f(locations.get("dhNearPlane"), viewport.projection.perspectiveNear());
-        glUniform1f(locations.get("dhFarPlane"), viewport.projection.perspectiveFar());
-        glUniform1i(locations.get("dhRenderDistance"), Math.round(VoxyConfig.CONFIG.sectionRenderDistance * 32));
+        glUniform1f(locations.get("dhNearPlane"), state.projection.perspectiveNear());
+        glUniform1f(locations.get("dhFarPlane"), state.projection.perspectiveFar());
+        glUniform1i(locations.get("dhRenderDistance"), Math.round(VoxyConfig.CONFIG.sectionRenderDistance * 32 * 16));
+        net.irisshaders.iris.gl.blending.BlendModeOverride.restore();
         source.getDirectives().getBlendModeOverride().ifPresent(override -> override.apply());
         for (var blend : bufferBlends) blend.apply();
     }

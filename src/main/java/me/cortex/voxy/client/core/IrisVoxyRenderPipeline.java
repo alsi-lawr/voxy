@@ -43,7 +43,10 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
             throw new IllegalStateException("Pipeline data already bound");
         }
         this.data.thePipeline = this;
-        if (data.prototype != null) data.prototype.owner = this;
+        if (data.prototype != null) {
+            data.prototype.frameState.reset();
+            data.prototype.owner = this;
+        }
 
         //Bind the drawbuffers
         var oDT = this.data.opaqueDrawTargets;
@@ -135,12 +138,20 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
             srcWidth = viewport.width;
             srcHeight = viewport.height;
         }
-        this.initDepthStencil(viewport, sourceDepthTexture, this.fb.framebuffer.id, srcWidth, srcHeight, viewport.width, viewport.height);
+        if (data.prototype != null) {
+            glClearNamedFramebufferfi(fb.framebuffer.id, GL_DEPTH_STENCIL, 0, properties.clearDepth(), 1);
+            glClearNamedFramebufferfi(fbTranslucent.framebuffer.id, GL_DEPTH_STENCIL, 0, properties.clearDepth(), 1);
+            glDisable(GL_STENCIL_TEST);
+            fb.bind();
+        } else {
+            this.initDepthStencil(viewport, sourceDepthTexture, this.fb.framebuffer.id, srcWidth, srcHeight, viewport.width, viewport.height);
+        }
         return this.fb.getDepthTex().id;
     }
 
     @Override
     protected void postOpaquePreTranslucent(Viewport<?> viewport, int sourceDepthTexture) {
+        if (data.prototype != null) return;
         if (this.shaderDepthHackFixTransformBlit != null) {
             this.fb.bind();
             glEnable(GL_DEPTH_TEST);
@@ -192,6 +203,35 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
     }
 
 
+    public void runDhWater(Viewport<?> viewport) {
+        me.cortex.voxy.client.core.util.GPUTiming.INSTANCE.marker("DH-depth-copy");
+        glBlitNamedFramebuffer(fb.framebuffer.id, fbTranslucent.framebuffer.id,
+                0, 0, viewport.width, viewport.height, 0, 0, viewport.width, viewport.height,
+                GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
+        glDisable(GL_STENCIL_TEST);
+        me.cortex.voxy.client.core.util.GPUTiming.INSTANCE.marker("DH-water");
+        ((AbstractSectionRenderer)sectionRenderer).renderTranslucent(viewport);
+        net.irisshaders.iris.gl.blending.BlendModeOverride.restore();
+    }
+
+    public void runDhShadow(Viewport<?> viewport, boolean water) {
+        glDisable(GL_STENCIL_TEST);
+        var targets = ((me.cortex.voxy.client.mixin.iris.IrisRenderingPipelineAccessor)
+                net.irisshaders.iris.Iris.getPipelineManager().getPipelineNullable()).getShadowRenderTargets();
+        var renderer = (me.cortex.voxy.client.core.rendering.section.backend.mdic.MDICSectionRenderer)sectionRenderer;
+        data.prototype.shadowFramebuffer().bind();
+        if (!water) {
+            me.cortex.voxy.client.core.util.GPUTiming.INSTANCE.marker("DH-shadow-traversal");
+            innerPrimaryWork(viewport, targets.getDepthTexture().getTextureId());
+            data.prototype.shadowFramebuffer().bind();
+            me.cortex.voxy.client.core.util.GPUTiming.INSTANCE.marker("DH-shadow-commands");
+            renderer.buildDrawCalls((me.cortex.voxy.client.core.rendering.section.backend.mdic.MDICViewport)viewport);
+        }
+        me.cortex.voxy.client.core.util.GPUTiming.INSTANCE.marker(water ? "DH-shadow-water" : "DH-shadow-opaque");
+        renderer.renderShadow(viewport, water);
+        net.irisshaders.iris.gl.blending.BlendModeOverride.restore();
+    }
+
     @Override
     public void bindUniforms() {
         this.bindUniforms(UNIFORM_BINDING_POINT);
@@ -216,14 +256,16 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
 
     @Override
     public void setupAndBindOpaque(Viewport<?> viewport) {
-        this.fb.bind();
+        if (data.prototype != null && me.cortex.voxy.client.core.util.IrisUtil.irisShadowActive()) data.prototype.shadowFramebuffer().bind();
+        else this.fb.bind();
         this.doBindings();
         if (this.data.prototype != null) this.data.prototype.bind(false, viewport);
     }
 
     @Override
     public void setupAndBindTranslucent(Viewport<?> viewport) {
-        this.fbTranslucent.bind();
+        if (data.prototype != null && me.cortex.voxy.client.core.util.IrisUtil.irisShadowActive()) data.prototype.shadowFramebuffer().bind();
+        else this.fbTranslucent.bind();
         this.doBindings();
         if (this.data.prototype != null) this.data.prototype.bind(true, viewport);
         if (this.data.getBlender() != null) {

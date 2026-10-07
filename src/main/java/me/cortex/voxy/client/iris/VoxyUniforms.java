@@ -56,18 +56,24 @@ public class VoxyUniforms {
 
         if (DhPrototype.activeEnvironment()) {
             uniforms
-                    .uniform1f(PER_FRAME, "dhNearPlane", ()->getProjection().perspectiveNear())
-                    .uniform1f(PER_FRAME, "dhFarPlane", ()->getProjection().perspectiveFar())
-
-                    .uniform1i(PER_FRAME, "dhRenderDistance", ()->Math.round(VoxyConfig.CONFIG.sectionRenderDistance*32))//In blocks
-                    .uniformMatrix(PER_FRAME, "dhProjection", VoxyUniforms::getProjection)
-                    .uniformMatrix(PER_FRAME, "dhProjectionInverse", new Inverted(VoxyUniforms::getProjection))
-                    .uniformMatrix(PER_FRAME, "dhPreviousProjection", new PreviousMat(VoxyUniforms::getProjection));
+                    .uniform1f(PER_FRAME, "dhNearPlane", () -> dhFrame().projection.perspectiveNear())
+                    .uniform1f(PER_FRAME, "dhFarPlane", () -> dhFrame().projection.perspectiveFar())
+                    .uniform1i(PER_FRAME, "dhRenderDistance", () -> Math.round(VoxyConfig.CONFIG.sectionRenderDistance * 32 * 16))
+                    .uniformMatrix(PER_FRAME, "dhProjection", () -> dhFrame().projection)
+                    .uniformMatrix(PER_FRAME, "dhProjectionInverse", () -> dhFrame().inverseProjection)
+                    .uniformMatrix(PER_FRAME, "dhPreviousProjection", () -> dhFrame().previousProjection);
         }
+
     }
 
 
 
+
+    private static final DhFrameState EMPTY_DH_FRAME = new DhFrameState();
+    private static DhFrameState dhFrame() {
+        var renderer = IVoxyRenderSystemHolder.getNullable();
+        return renderer == null || renderer.getDhPrototype() == null ? EMPTY_DH_FRAME : renderer.getDhPrototype().frameState;
+    }
 
     private record Inverted(Supplier<Matrix4f> parent) implements Supplier<Matrix4f> {
         private Inverted(Supplier<Matrix4f> parent) {

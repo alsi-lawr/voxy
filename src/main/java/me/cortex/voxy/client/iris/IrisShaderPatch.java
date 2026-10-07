@@ -323,6 +323,8 @@ public class IrisShaderPatch {
         data.opaquePatchData = "";
         data.translucentPatchData = "";
         data.skipShaderDepthHackFix = true;
+        data.excludeLodsFromVanillaDepth = true;
+        data.useDynamicFarPlane = true;
         var patch = new IrisShaderPatch(data, programs.getPack());
         patch.prototype = prototype;
         return patch;

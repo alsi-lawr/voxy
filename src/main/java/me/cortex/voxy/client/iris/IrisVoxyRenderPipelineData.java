@@ -114,7 +114,7 @@ public class IrisVoxyRenderPipelineData {
         var ssboSet = createSSBOLayouts(patch.getSSBOs(), ssboHolder);
 
         var opaqueDrawTargets = getDrawBuffers(patch.getOpqaueTargets(), ipipe.getFlippedAfterPrepare(), ((IrisRenderingPipelineAccessor)ipipe).getRenderTargets());
-        var translucentDrawTargets = getDrawBuffers(patch.getTranslucentTargets(), ipipe.getFlippedAfterPrepare(), ((IrisRenderingPipelineAccessor)ipipe).getRenderTargets());
+        var translucentDrawTargets = getDrawBuffers(patch.getTranslucentTargets(), patch.prototype != null ? ipipe.getFlippedAfterTranslucent() : ipipe.getFlippedAfterPrepare(), ((IrisRenderingPipelineAccessor)ipipe).getRenderTargets());
 
 
 
@@ -149,7 +149,7 @@ public class IrisVoxyRenderPipelineData {
     }
 
     public boolean shouldDeferTranslucency() {
-        return false;
+        return prototype != null;
     }
 
     public record StructLayout(int size, String layout, LongConsumer updater) {}
