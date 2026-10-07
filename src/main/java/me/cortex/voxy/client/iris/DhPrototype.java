@@ -215,7 +215,7 @@ public final class DhPrototype {
         if (me.cortex.voxy.client.core.util.IrisUtil.irisShadowActive()) {
             if (translucent ? !shadowWaterSubmitted : !shadowSubmitted) {
                 if (translucent) shadowWaterSubmitted = true; else shadowSubmitted = true;
-                write(receipt + (translucent ? "-shadow-water-submission.txt" : "-shadow-submission.txt"), "projection=" + viewport.projection + "\nmodelView=" + viewport.modelView + "\nsize=" + viewport.width + "x" + viewport.height + "\nplacement=" + (translucent ? "after Iris shadow opaque depthcopy; before normal shadow translucent" : "before normal shadow terrain") + "; GPU traversal/cull/MDI\n" + shadowProgram.resourceBindings()
+                write(receipt + (translucent ? "-shadow-water-submission.txt" : "-shadow-submission.txt"), "irisPhase=" + pipeline.getPhase() + "\nirisShadowActive=true\nprojection=" + viewport.projection + "\nmodelView=" + viewport.modelView + "\nsize=" + viewport.width + "x" + viewport.height + "\nplacement=" + (translucent ? "after Iris shadow opaque depthcopy; before normal shadow translucent" : "before normal shadow terrain") + "; GPU traversal/cull/MDI\n" + shadowProgram.resourceBindings()
                         + shadowTargetInventory() + "shadowViewportBuffersBytes=" + shadowViewportBytes(viewport) + "\n"
                         + "shadowBoundingDepthBytes=" + (4L * viewport.width * viewport.height) + "\n"
                         + "shadowHiZLogicalBytesUpperBound=" + (16L * Integer.highestOneBit(viewport.width) * Integer.highestOneBit(viewport.height) / 3) + "\n");

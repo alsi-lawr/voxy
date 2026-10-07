@@ -51,8 +51,19 @@ public class MixinLevelRenderer {
             if (viewport != null) renderer.getDhPrototype().beginFrame(viewport);
         }
         if (!water) IrisUtil.USED_IRIS_VIEWPORT = false;
-        if (water) renderer.renderDhWater(viewport, target.getDepthTextureId(), target.getColorTextureId());
-        else renderer.renderOpaque(viewport, target.getDepthTextureId(), target.getColorTextureId());
+        var pipeline = (net.irisshaders.iris.pipeline.IrisRenderingPipeline)net.irisshaders.iris.Iris.getPipelineManager().getPipelineNullable();
+        var previousPhase = pipeline.getPhase();
+        net.irisshaders.iris.gl.program.ProgramUniforms.clearActiveUniforms();
+        pipeline.setPhase(net.irisshaders.iris.pipeline.WorldRenderingPhase.fromTerrainRenderType(layer));
+        net.irisshaders.iris.layer.GbufferPrograms.runPhaseChangeNotifier();
+        try {
+            if (water) renderer.renderDhWater(viewport, target.getDepthTextureId(), target.getColorTextureId());
+            else renderer.renderOpaque(viewport, target.getDepthTextureId(), target.getColorTextureId());
+        } finally {
+            net.irisshaders.iris.gl.program.ProgramUniforms.clearActiveUniforms();
+            pipeline.setPhase(previousPhase);
+            net.irisshaders.iris.layer.GbufferPrograms.runPhaseChangeNotifier();
+        }
     }
 
 }

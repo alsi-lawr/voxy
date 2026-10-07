@@ -40,7 +40,19 @@ public class MixinShadowRenderer {
         var viewport = water ? renderer.getViewport() : renderer.setupViewport(ShadowRenderer.PROJECTION,
                 ShadowRenderer.MODELVIEW, FogParameters.current, shadows.getResolution(), shadows.getResolution(), pos.x, pos.y, pos.z);
         var target = Minecraft.getInstance().getMainRenderTarget();
-        if (water) renderer.renderDhWater(viewport, target.getDepthTextureId(), target.getColorTextureId());
-        else renderer.renderOpaque(viewport, target.getDepthTextureId(), target.getColorTextureId());
+        var pipeline = (net.irisshaders.iris.pipeline.IrisRenderingPipeline)Iris.getPipelineManager().getPipelineNullable();
+        var previousPhase = pipeline.getPhase();
+        net.irisshaders.iris.gl.program.ProgramUniforms.clearActiveUniforms();
+        pipeline.setPhase(water ? net.irisshaders.iris.pipeline.WorldRenderingPhase.TERRAIN_TRANSLUCENT
+                : net.irisshaders.iris.pipeline.WorldRenderingPhase.TERRAIN_SOLID);
+        net.irisshaders.iris.layer.GbufferPrograms.runPhaseChangeNotifier();
+        try {
+            if (water) renderer.renderDhWater(viewport, target.getDepthTextureId(), target.getColorTextureId());
+            else renderer.renderOpaque(viewport, target.getDepthTextureId(), target.getColorTextureId());
+        } finally {
+            net.irisshaders.iris.gl.program.ProgramUniforms.clearActiveUniforms();
+            pipeline.setPhase(previousPhase);
+            net.irisshaders.iris.layer.GbufferPrograms.runPhaseChangeNotifier();
+        }
     }
 }

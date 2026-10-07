@@ -111,6 +111,8 @@ final class DhPrototypeProgram {
         } finally {
             glActiveTexture(activeTexture);
         }
+        int stageLocation = glGetUniformLocation(id, "renderStage");
+        receipt.append("renderStageUniform=").append(stageLocation < 0 ? "inactive" : glGetUniformi(id, stageLocation)).append('\n');
         return receipt.toString();
     }
 
