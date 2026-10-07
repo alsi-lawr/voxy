@@ -22,6 +22,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class MixinIrisRenderingPipeline implements IGetVoxyPatchData, IGetIrisVoxyPipelineData {
     @Shadow @Final private CustomUniforms customUniforms;
     @Shadow private ShaderStorageBufferHolder shaderStorageBufferHolder;
+    @Shadow private net.irisshaders.iris.pathways.colorspace.ColorSpaceConverter colorSpaceConverter;
     @Unique private net.irisshaders.iris.gl.sampler.GlSampler voxy$depthSampler;
     @Unique private me.cortex.voxy.client.iris.DhTranslationFailure voxy$loadFailure;
     @Unique IrisShaderPatch patchData;
@@ -110,6 +111,9 @@ public class MixinIrisRenderingPipeline implements IGetVoxyPatchData, IGetIrisVo
         if (voxy$depthSampler != null) {
             voxy$depthSampler.destroy();
             voxy$depthSampler = null;
+        }
+        if (colorSpaceConverter instanceof me.cortex.voxy.client.iris.IColorSpaceConverterCleanup cleanup) {
+            cleanup.voxy$destroyConverter();
         }
     }
 

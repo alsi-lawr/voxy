@@ -5,6 +5,7 @@
   "compatibilityLevel": "JAVA_17",
   "client": [
     "iris.CustomUniformsAccessor",
+    "iris.MixinColorSpaceFragmentConverter",
     "iris.IrisRenderingPipelineAccessor",
     "iris.MixinIris",
     "iris.MixinIrisRenderingPipeline",
