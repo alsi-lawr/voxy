@@ -439,6 +439,10 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
             glMemoryBarrier(GL_COMMAND_BARRIER_BIT|GL_SHADER_STORAGE_BARRIER_BIT);
         }
 
+        if (hasShadowCommands && me.cortex.voxy.client.iris.DhPrototype.SHADOW_COUNT_RECEIPTS
+                && me.cortex.voxy.client.core.util.IrisUtil.irisShadowActive()) {
+            ((me.cortex.voxy.client.core.IrisVoxyRenderPipeline)pipeline)._getData().prototype.recordShadowCounts(viewport);
+        }
     }
 
     @Override

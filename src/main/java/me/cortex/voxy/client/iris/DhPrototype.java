@@ -50,6 +50,9 @@ public final class DhPrototype {
     private boolean shadowWaterSubmitted;
     private int frameReceipts;
     private static final boolean FRAME_RECEIPTS = Boolean.getBoolean("voxy.dhPrototype.frameReceipts");
+    public static final boolean SHADOW_COUNT_RECEIPTS = Boolean.getBoolean("voxy.dhPrototype.shadowCountReceipts");
+    private int shadowCountReceipts;
+    private int shadowCountFrames;
     private final boolean[] submitted = new boolean[2];
 
     DhPrototype(ProgramSource terrain, ProgramSource water, DhShaderEnvironment environment, String dimension) {
@@ -210,6 +213,37 @@ public final class DhPrototype {
     }
 
     public net.irisshaders.iris.gl.framebuffer.GlFramebuffer shadowFramebuffer() { return shadowFramebuffer; }
+
+    public void recordShadowCounts(me.cortex.voxy.client.core.rendering.section.backend.mdic.MDICViewport viewport) {
+        if (output == null || shadowCountReceipts >= 32) return;
+        int sampleFrame = shadowCountFrames++;
+        if (sampleFrame >= 8 && sampleFrame % 120 != 0) return;
+        Path file = output.resolve(receipt + "-shadow-counts-" + shadowCountReceipts++ + ".txt");
+        String metadata = "dimension=" + dimension + "\nframe=" + viewport.frameId
+                + "\nsampleFrame=" + sampleFrame + "\nsize=" + viewport.width + "x" + viewport.height
+                + "\ncamera=" + viewport.cameraX + "," + viewport.cameraY + "," + viewport.cameraZ
+                + "\nprojection=" + viewport.projection + "\nmodelView=" + viewport.modelView
+                + "\nlightDirection=" + viewport.modelView.m02() + "," + viewport.modelView.m12() + "," + viewport.modelView.m22()
+                + "\nshadowPerspective=" + (viewport.projection.m33() == 0)
+                + "\nsource=after shadow traversal, raster visibility, command generation and translucent sorting; before MDI"
+                + "\nreadback=existing asynchronous DownloadStream; counts are not surviving-fragment proof\n";
+        long[] sections = new long[1];
+        var downloads = me.cortex.voxy.client.core.rendering.util.DownloadStream.INSTANCE;
+        downloads.download(viewport.getRenderList(), 0, 4, (ptr, size) ->
+                sections[0] = Integer.toUnsignedLong(org.lwjgl.system.MemoryUtil.memGetInt(ptr)));
+        // DownloadStream delivers these queued copies in order, after its existing fence signals.
+        downloads.download(viewport.drawCountCallBuffer, 0, 24, (ptr, size) -> {
+            String counts = "traversalSections=" + sections[0]
+                    + "\ncmdGenDispatch=" + Integer.toUnsignedLong(org.lwjgl.system.MemoryUtil.memGetInt(ptr)) + ","
+                    + Integer.toUnsignedLong(org.lwjgl.system.MemoryUtil.memGetInt(ptr + 4)) + ","
+                    + Integer.toUnsignedLong(org.lwjgl.system.MemoryUtil.memGetInt(ptr + 8))
+                    + "\nopaqueCommands=" + Integer.toUnsignedLong(org.lwjgl.system.MemoryUtil.memGetInt(ptr + 12))
+                    + "\nwaterCommands=" + Integer.toUnsignedLong(org.lwjgl.system.MemoryUtil.memGetInt(ptr + 16))
+                    + "\ntemporalCommands=" + Integer.toUnsignedLong(org.lwjgl.system.MemoryUtil.memGetInt(ptr + 20)) + "\n";
+            try { Files.createDirectories(file.getParent()); Files.writeString(file, metadata + counts); }
+            catch (IOException e) { throw new IllegalStateException("VOXY-005 shadow count receipt write failed", e); }
+        });
+    }
 
     public void recordSubmission(boolean translucent, Viewport<?> viewport) {
         if (me.cortex.voxy.client.core.util.IrisUtil.irisShadowActive()) {
