@@ -143,45 +143,64 @@ public class Shader extends TrackedObject {
         }
 
 
-        private int compileToProgram() {
-            int program = GL20C.glCreateProgram();
+        interface Compiler {
+            int createProgram();
+            int createShader(ShaderType type, String source);
+            void attach(int program, int shader);
+            void link(int program);
+            void detach(int program, int shader);
+            void deleteShader(int shader);
+            void deleteProgram(int program);
+        }
+
+        private static final Compiler GL_COMPILER = new Compiler() {
+            public int createProgram() { return GL20C.glCreateProgram(); }
+            public int createShader(ShaderType type, String source) { return Builder.createShader(type, source); }
+            public void attach(int program, int shader) { GL20C.glAttachShader(program, shader); }
+            public void link(int program) {
+                GL20C.glLinkProgram(program);
+                printProgramLinkLog(program);
+                verifyProgramLinked(program);
+            }
+            public void detach(int program, int shader) { GL20C.glDetachShader(program, shader); }
+            public void deleteShader(int shader) { GL20C.glDeleteShader(shader); }
+            public void deleteProgram(int program) { GL20C.glDeleteProgram(program); }
+        };
+
+        int compileToProgram(Compiler compiler) {
+            int program = compiler.createProgram();
             int[] shaders = new int[this.sources.size()];
-            {
+            boolean linked = false;
+            try {
                 String defs = this.defines.entrySet().stream().map(a->"#define " + a.getKey() + " " + a.getValue() + "\n").collect(Collectors.joining());
                 int i = 0;
                 for (var entry : this.sources.entrySet()) {
                     String src = entry.getValue();
-
-                    //Inject defines
-                    src = src.substring(0, src.indexOf('\n')+1) +
-                            defs
-                            + src.substring(src.indexOf('\n')+1);
-
-                    for (var replacement : this.replacements.entrySet()) {
-                        src = src.replace(replacement.getKey(), replacement.getValue());
-                    }
-
-                    shaders[i++] = createShader(entry.getKey(), src);
+                    src = src.substring(0, src.indexOf('\n')+1) + defs + src.substring(src.indexOf('\n')+1);
+                    for (var replacement : this.replacements.entrySet()) src = src.replace(replacement.getKey(), replacement.getValue());
+                    int shader = compiler.createShader(entry.getKey(), src);
+                    shaders[i++] = shader;
+                    compiler.attach(program, shader);
+                }
+                compiler.link(program);
+                linked = true;
+                return program;
+            } finally {
+                // Deleting the program releases attached stages on failure; successful links retain only their executable.
+                if (!linked) compiler.deleteProgram(program);
+                for (int shader : shaders) if (shader != 0) {
+                    if (linked) compiler.detach(program, shader);
+                    compiler.deleteShader(shader);
                 }
             }
-
-            for (int i : shaders) {
-                GL20C.glAttachShader(program, i);
-            }
-            GL20C.glLinkProgram(program);
-            for (int i : shaders) {
-                GL20C.glDetachShader(program, i);
-                GL20C.glDeleteShader(i);
-            }
-            printProgramLinkLog(program);
-            verifyProgramLinked(program);
-            return program;
         }
 
         public T compile() {
             this.defineIf("IS_INTEL", Capabilities.INSTANCE.isIntel);
             this.defineIf("IS_WINDOWS", ThreadUtils.isWindows);
-            return this.constructor.make(this, this.compileToProgram());
+            int program = this.compileToProgram(GL_COMPILER);
+            try { return this.constructor.make(this, program); }
+            catch (RuntimeException | Error failure) { GL20C.glDeleteProgram(program); throw failure; }
         }
 
         private static void printProgramLinkLog(int program) {
@@ -196,39 +215,40 @@ public class Shader extends TrackedObject {
             int result = GL20C.glGetProgrami(program, GL20C.GL_LINK_STATUS);
 
             if (result != GL20C.GL_TRUE) {
-                throw new RuntimeException("Shader program linking failed, see log for details");
+                throw new RuntimeException("Shader program linking failed: " + GL20C.glGetProgramInfoLog(program));
             }
         }
 
         private static int createShader(ShaderType type, String src) {
             int shader = GL20C.glCreateShader(type.gl);
-            {//https://github.com/CaffeineMC/sodium/blob/fc42a7b19836c98a35df46e63303608de0587ab6/src/main/java/me/jellysquid/mods/sodium/client/gl/shader/ShaderWorkarounds.java
-                long ptr = MemoryUtil.memAddress(MemoryUtil.memUTF8(src, true));
-                try (var stack = MemoryStack.stackPush()) {
-                    GL20C.nglShaderSource(shader, 1, stack.pointers(ptr).address0(), 0);
+            try {
+                {//https://github.com/CaffeineMC/sodium/blob/fc42a7b19836c98a35df46e63303608de0587ab6/src/main/java/me/jellysquid/mods/sodium/client/gl/shader/ShaderWorkarounds.java
+                    long ptr = MemoryUtil.memAddress(MemoryUtil.memUTF8(src, true));
+                    try (var stack = MemoryStack.stackPush()) {
+                        GL20C.nglShaderSource(shader, 1, stack.pointers(ptr).address0(), 0);
+                    } finally { MemoryUtil.nmemFree(ptr); }
                 }
-                MemoryUtil.nmemFree(ptr);
-            }
-            GL20C.glCompileShader(shader);
-            String log = GL20C.glGetShaderInfoLog(shader);
+                GL20C.glCompileShader(shader);
+                String log = GL20C.glGetShaderInfoLog(shader);
 
-            if (!log.isEmpty()) {
-                Logger.warn(log);
-            }
+                if (!log.isEmpty()) {
+                    Logger.warn(log);
+                }
 
-            int result = GL20C.glGetShaderi(shader, GL20C.GL_COMPILE_STATUS);
+                int result = GL20C.glGetShaderi(shader, GL20C.GL_COMPILE_STATUS);
 
-            if (result != GL20C.GL_TRUE) {
+                if (result != GL20C.GL_TRUE) {
+                    var failure = new RuntimeException("Shader compilation failed of type " + type.name() + ": " + log);
+                    try { Files.writeString(Path.of("SHADER_DUMP.txt"), src); }
+                    catch (IOException dumpFailure) { failure.addSuppressed(dumpFailure); }
+                    throw failure;
+                }
+
+                return shader;
+            } catch (RuntimeException | Error failure) {
                 GL20C.glDeleteShader(shader);
-                try {
-                    Files.writeString(Path.of("SHADER_DUMP.txt"), src);
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-                throw new RuntimeException("Shader compilation failed of type " + type.name() + ", see log for details, dumped shader");
+                throw failure;
             }
-
-            return shader;
         }
     }
 }

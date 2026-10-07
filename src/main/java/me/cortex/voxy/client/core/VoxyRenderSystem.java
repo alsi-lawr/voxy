@@ -262,7 +262,11 @@ public class VoxyRenderSystem {
     }
 
     private void renderStage(Viewport<?> viewport, int sourceDepthTexture, int sourceColourTexture, boolean water) {
-        if (me.cortex.voxy.client.core.util.LodRenderOwnership.suppressVoxyDraw()) return;
+        if (me.cortex.voxy.client.core.util.LodRenderOwnership.suppressVoxyDraw()) {
+            if (getDhPrototype() != null) getDhPrototype().invalidateOwnership();
+            return;
+        }
+        if (getDhPrototype() != null && !getDhPrototype().ready()) return;
         if (viewport == null) {
             return;
         }

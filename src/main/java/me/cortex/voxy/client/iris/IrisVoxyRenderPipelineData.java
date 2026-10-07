@@ -119,7 +119,25 @@ public class IrisVoxyRenderPipelineData {
 
 
         //TODO: need to transform the string patch with the uniform decleration aswell as sampler declerations
+        if (patch.prototype != null) {
+            verifyAdapterTargets(patch.prototype, opaqueDrawTargets, patch.prototype.terrain.getName());
+            verifyAdapterTargets(patch.prototype, translucentDrawTargets, patch.prototype.water.getName());
+        }
         return new IrisVoxyRenderPipelineData(patch, opaqueDrawTargets, translucentDrawTargets, uniforms, patch.createBlendSetup(), imageSet, ssboSet);
+    }
+
+    private static void verifyAdapterTargets(DhPrototype prototype, int[] textures, String program) {
+        var framebuffer = new me.cortex.voxy.client.core.gl.GlFramebuffer();
+        try {
+            int[] buffers = new int[textures.length];
+            for (int i = 0; i < textures.length; i++) {
+                buffers[i] = org.lwjgl.opengl.GL30.GL_COLOR_ATTACHMENT0 + i;
+                framebuffer.bind(buffers[i], textures[i]);
+            }
+            framebuffer.setDrawBuffers(buffers).verify();
+        } catch (RuntimeException failure) {
+            throw prototype.failure(DhTranslationFailure.Code.TARGET_BINDING_FAILED, program, failure);
+        } finally { framebuffer.free(); }
     }
 
     private static int[] getDrawBuffers(int[] targets, ImmutableSet<Integer> stageWritesToAlt, RenderTargets rt) {

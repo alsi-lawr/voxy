@@ -12,6 +12,11 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 
 @Mixin(value = Iris.class, remap = false)
 public class MixinIris {
+    @org.spongepowered.asm.mixin.injection.Inject(method = "destroyEverything", at = @At("RETURN"))
+    private static void voxy$clearDhEnvironment(org.spongepowered.asm.mixin.injection.callback.CallbackInfo ci) {
+        me.cortex.voxy.client.iris.DhPrototype.clearEnvironment();
+    }
+
     @Redirect(method = "createPipeline", at = @At(value = "INVOKE", target = "Lnet/irisshaders/iris/shaderpack/ShaderPack;getProgramSet(Lnet/irisshaders/iris/shaderpack/materialmap/NamespacedId;)Lnet/irisshaders/iris/shaderpack/programs/ProgramSet;"))
     private static ProgramSet voxy$redirectProgramSet(ShaderPack shaderPack, NamespacedId dim) {
         try {

@@ -36,14 +36,16 @@ public final class DhPrototype {
     private final boolean shadowEnabled;
     public final DhFrameState frameState = new DhFrameState();
     private Stages shadowStages;
-    private DhPrototypeProgram shadowProgram;
+    private Program shadowProgram;
     private net.irisshaders.iris.gl.framebuffer.GlFramebuffer shadowFramebuffer;
     public IrisVoxyRenderPipeline owner;
     private IrisRenderingPipeline pipeline;
     private CustomUniforms uniforms;
-    private DhPrototypeProgram opaqueProgram;
-    private DhPrototypeProgram waterProgram;
+    private Program opaqueProgram;
+    private Program waterProgram;
     private String receipt;
+    private boolean closed;
+    private DhTranslationFailure activationFailure;
     private Stages terrainStages;
     private Stages waterStages;
     private boolean shadowSubmitted;
@@ -76,6 +78,13 @@ public final class DhPrototype {
     public static boolean activeEnvironment() { return environmentActive; }
     public static DhShaderEnvironment loadedEnvironment() { return loadedEnvironment; }
 
+    public static void clearEnvironment() {
+        environmentActive = false;
+        if (loadedEnvironment != null) loadedEnvironment.translations().clear();
+        loadedEnvironment = null;
+        output = null;
+    }
+
     public static void requireNoDh() {
         if (me.cortex.voxy.client.core.util.LodRenderOwnership.dhActive()) {
             throw new DhTranslationFailure(DhTranslationFailure.Code.LOD_ENGINE_CONFLICT,
@@ -85,13 +94,14 @@ public final class DhPrototype {
     }
 
     public static ImmutableList<StringPair> environment(Path root, Map<String, String> options, ImmutableList<StringPair> environment) {
-        environmentActive = false;
-        loadedEnvironment = null;
-        output = null;
+        clearEnvironment();
         if (!requested()) return environment;
         try (var paths = Files.walk(root)) {
             if (paths.anyMatch(path -> path.getFileName().toString().equals("voxy.json") && Files.isRegularFile(path))) return environment;
-        } catch (IOException e) { throw new IllegalStateException("VOXY-003 cannot establish native metadata precedence", e); }
+        } catch (IOException e) {
+            throw new DhTranslationFailure(DhTranslationFailure.Code.RELOAD_FAILED, root.toUri().toString(), "loading", "native_metadata",
+                    "cannot establish native metadata precedence", e);
+        }
         requireNoDh();
         String outputPath = System.getProperty("voxy.dhPrototype.output");
         if (outputPath != null) output = Path.of(outputPath);
@@ -110,7 +120,10 @@ public final class DhPrototype {
                 String text = manifest.toString();
                 write("environment-" + hash(text.getBytes(java.nio.charset.StandardCharsets.UTF_8)) + ".txt", text + "identity=" + loadedEnvironment.identity() + "\n");
             }
-        } catch (IOException e) { throw new IllegalStateException("VOXY-003 cannot preserve source receipt", e); }
+        } catch (IOException e) {
+            throw new DhTranslationFailure(DhTranslationFailure.Code.RELOAD_FAILED, root.toUri().toString(), "loading", "adapter",
+                    "cannot snapshot selected shader sources", e);
+        }
         environmentActive = true;
         return result;
     }
@@ -151,6 +164,9 @@ public final class DhPrototype {
     }
 
     public void bindPipeline(IrisRenderingPipeline pipeline, CustomUniforms uniforms) {
+        if (this.pipeline != null || ready()) throw new IllegalStateException("DH candidate already belongs to a live Iris pipeline");
+        closed = false;
+        activationFailure = null;
         this.pipeline = pipeline;
         this.uniforms = uniforms;
     }
@@ -198,17 +214,90 @@ public final class DhPrototype {
         }
     }
 
-    public void attach(int terrainId, int waterId, int shadowId, long compileNanos) {
-        opaqueProgram = new DhPrototypeProgram(terrainId, terrain, pipeline, uniforms, false, false);
-        waterProgram = new DhPrototypeProgram(waterId, water, pipeline, uniforms, true, false);
-        if (shadowId != 0) {
-            shadowProgram = new DhPrototypeProgram(shadowId, shadow, pipeline, uniforms, false, true);
-            shadowFramebuffer = pipeline.createDHFramebufferShadow(shadow);
+    interface Program {
+        int id();
+        void bind(Viewport<?> viewport, DhFrameState state);
+        String resourceBindings();
+        void close();
+    }
+
+    @FunctionalInterface
+    interface ProgramFactory {
+        Program create(ProgramSource source, Stages stages, boolean water, boolean shadow);
+    }
+
+    public boolean ready() { return !closed && activationFailure == null && opaqueProgram != null; }
+
+    public void preparePrograms() {
+        preparePrograms((source, stages, water, shadow) -> {
+            me.cortex.voxy.client.core.gl.shader.Shader shader;
+            try {
+                shader = me.cortex.voxy.client.core.gl.shader.Shader.make()
+                        .addSource(me.cortex.voxy.client.core.gl.shader.ShaderType.VERTEX, stages.vertex())
+                        .addSource(me.cortex.voxy.client.core.gl.shader.ShaderType.FRAGMENT, stages.fragment()).compile();
+            } catch (RuntimeException failure) {
+                throw failure(DhTranslationFailure.Code.COMPILE_OR_LINK_FAILED, source.getName(), failure);
+            }
+            try { return new DhPrototypeProgram(shader, source, pipeline, uniforms, water, shadow); }
+            catch (RuntimeException failure) {
+                shader.free();
+                throw failure(DhTranslationFailure.Code.BINDING_FAILED, source.getName(), failure);
+            }
+        }, () -> {
+            if (shadowEnabled) {
+                shadowFramebuffer = pipeline.createDHFramebufferShadow(shadow);
+                int status = shadowFramebuffer.getStatus();
+                if (status != org.lwjgl.opengl.GL30.GL_FRAMEBUFFER_COMPLETE)
+                    throw failure(DhTranslationFailure.Code.TARGET_BINDING_FAILED, shadow.getName(),
+                            new IllegalStateException("shadow framebuffer status=" + status));
+            }
+        });
+    }
+
+    void preparePrograms(ProgramFactory factory, Runnable validateTargets) {
+        if (closed) throw failure(DhTranslationFailure.Code.OWNER_DESTROYED, "adapter", null);
+        if (activationFailure != null) throw activationFailure;
+        if (ready()) return;
+        Program opaque = null, water = null, shadow = null;
+        long start = System.nanoTime();
+        try {
+            opaque = factory.create(terrain, stages(false), false, false);
+            water = factory.create(this.water, stages(true), true, false);
+            if (shadowEnabled) shadow = factory.create(this.shadow, shadowStages(), false, true);
+            validateTargets.run();
+            write(receipt + "-link.txt", "terrain=" + opaque.id() + " water=" + water.id() + " shadow="
+                    + (shadow == null ? 0 : shadow.id()) + " shadowEnabled=" + shadowEnabled
+                    + " validated before Voxy renderer activation; owner=Iris pipeline\ncompileNanos=" + (System.nanoTime() - start) + "\n");
+        } catch (RuntimeException failure) {
+            if (shadow != null) shadow.close();
+            if (water != null) water.close();
+            if (opaque != null) opaque.close();
+            activationFailure = failure instanceof DhTranslationFailure typed ? typed
+                    : failure(DhTranslationFailure.Code.TARGET_BINDING_FAILED, "adapter", failure);
+            throw activationFailure;
         }
-        write(receipt + "-link.txt", "terrain=" + terrainId + " water=" + waterId + " shadow=" + shadowId + " shadowEnabled=" + shadowEnabled + " linked by Voxy Shader.compile\ncompileNanos=" + compileNanos + "\n");
+        opaqueProgram = opaque;
+        waterProgram = water;
+        shadowProgram = shadow;
+    }
+
+    public DhTranslationFailure failure(DhTranslationFailure.Code code, String program, Throwable cause) {
+        return new DhTranslationFailure(code, environment.pack(), dimension, program,
+                cause == null ? "Iris owner is no longer live; reload required" : cause.getMessage(), cause);
+    }
+
+    public void invalidateOwnership() {
+        if (activationFailure != null) return;
+        activationFailure = failure(DhTranslationFailure.Code.LOD_ENGINE_CONFLICT, "adapter",
+                new IllegalStateException("DH rendering became active; reload after selecting one LOD renderer"));
+        me.cortex.voxy.common.Logger.error(activationFailure);
+        environment.translations().clear();
+        releasePrograms();
+        frameState.reset();
     }
 
     public void bind(boolean translucent, Viewport<?> viewport) {
+        if (!ready()) throw activationFailure == null ? failure(DhTranslationFailure.Code.OWNER_DESTROYED, "adapter", null) : activationFailure;
         (me.cortex.voxy.client.core.util.IrisUtil.irisShadowActive() ? shadowProgram : translucent ? waterProgram : opaqueProgram).bind(viewport, frameState);
     }
 
@@ -359,12 +448,31 @@ public final class DhPrototype {
         return receipt.toString();
     }
 
-    public void close() {
+    public void detachRenderer() {
         owner = null;
+        frameState.reset();
+    }
+
+    private void releasePrograms() {
+        if (opaqueProgram != null) opaqueProgram.close();
+        if (waterProgram != null) waterProgram.close();
+        if (shadowProgram != null) shadowProgram.close();
         opaqueProgram = null;
         waterProgram = null;
         shadowProgram = null;
+    }
+
+    public void close() {
+        if (closed) return;
+        closed = true;
+        detachRenderer();
+        releasePrograms();
         shadowFramebuffer = null;
+        pipeline = null;
+        uniforms = null;
+        terrainStages = null;
+        waterStages = null;
+        shadowStages = null;
     }
 
     static void write(String file, String contents) {

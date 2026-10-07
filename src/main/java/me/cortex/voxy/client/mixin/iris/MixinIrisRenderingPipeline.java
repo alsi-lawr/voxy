@@ -23,6 +23,7 @@ public class MixinIrisRenderingPipeline implements IGetVoxyPatchData, IGetIrisVo
     @Shadow @Final private CustomUniforms customUniforms;
     @Shadow private ShaderStorageBufferHolder shaderStorageBufferHolder;
     @Unique private net.irisshaders.iris.gl.sampler.GlSampler voxy$depthSampler;
+    @Unique private me.cortex.voxy.client.iris.DhTranslationFailure voxy$loadFailure;
     @Unique IrisShaderPatch patchData;
     @Unique
     IrisVoxyRenderPipelineData pipeline;
@@ -30,7 +31,8 @@ public class MixinIrisRenderingPipeline implements IGetVoxyPatchData, IGetIrisVo
     @Inject(method = "<init>", at = @At(value = "INVOKE", target = "Lnet/irisshaders/iris/pipeline/transform/ShaderPrinter;resetPrintState()V", shift = At.Shift.AFTER))
     private void voxy$injectPatchDataStore(ProgramSet programSet, CallbackInfo ci) {
         if (IrisUtil.SHADER_SUPPORT) {
-            this.patchData = ((IGetVoxyPatchData) programSet).voxy$getPatchData();
+            try { this.patchData = ((IGetVoxyPatchData) programSet).voxy$getPatchData(); }
+            catch (me.cortex.voxy.client.iris.DhTranslationFailure failure) { this.voxy$loadFailure = failure; }
         }
     }
 
@@ -47,7 +49,29 @@ public class MixinIrisRenderingPipeline implements IGetVoxyPatchData, IGetIrisVo
     @Inject(method = "<init>", at = @At(value = "INVOKE", target = "Lnet/irisshaders/iris/pipeline/IrisRenderingPipeline;createSetupComputes([Lnet/irisshaders/iris/shaderpack/programs/ComputeSource;Lnet/irisshaders/iris/shaderpack/programs/ProgramSet;Lnet/irisshaders/iris/shaderpack/texture/TextureStage;)[Lnet/irisshaders/iris/gl/program/ComputeProgram;"))
     private void voxy$injectPipeline(ProgramSet programSet, CallbackInfo ci) {
         if (this.patchData != null) {
-            this.pipeline = IrisVoxyRenderPipelineData.buildPipeline((IrisRenderingPipeline)(Object)this, this.patchData, this.customUniforms, this.shaderStorageBufferHolder);
+            if (this.patchData.prototype == null) {
+                this.pipeline = IrisVoxyRenderPipelineData.buildPipeline((IrisRenderingPipeline)(Object)this, this.patchData, this.customUniforms, this.shaderStorageBufferHolder);
+            } else {
+                try {
+                    this.pipeline = IrisVoxyRenderPipelineData.buildPipeline((IrisRenderingPipeline)(Object)this, this.patchData, this.customUniforms, this.shaderStorageBufferHolder);
+                    this.patchData.prototype.preparePrograms();
+                } catch (RuntimeException failure) {
+                    this.voxy$loadFailure = failure instanceof me.cortex.voxy.client.iris.DhTranslationFailure typed ? typed
+                            : this.patchData.prototype.failure(me.cortex.voxy.client.iris.DhTranslationFailure.Code.RELOAD_FAILED, "adapter", failure);
+                    this.patchData.prototype.close();
+                    this.pipeline = null;
+                }
+            }
+        }
+    }
+
+    @Inject(method = "<init>", at = @At("RETURN"))
+    private void voxy$rejectFailedCandidate(ProgramSet programSet, CallbackInfo ci) {
+        if (this.voxy$loadFailure != null) {
+            // Finish Iris initialization so its existing destroy path can release its own targets/renderers safely.
+            var failure = this.voxy$loadFailure;
+            ((IrisRenderingPipeline)(Object)this).destroy();
+            throw failure;
         }
     }
 
@@ -74,6 +98,15 @@ public class MixinIrisRenderingPipeline implements IGetVoxyPatchData, IGetIrisVo
 
     @Inject(method = "destroy", at = @At("HEAD"))
     private void voxy$destroyDepthSampler(CallbackInfo ci) {
+        if (this.pipeline != null && this.pipeline.thePipeline != null) {
+            var holder = IVoxyRenderSystemHolder.getNullableHolder();
+            if (holder != null) holder.voxy$shutdownRenderer();
+        }
+        if (patchData != null && patchData.prototype != null) patchData.prototype.close();
+        this.pipeline = null;
+        this.patchData = null;
+        IrisUtil.CAPTURED_VIEWPORT_PARAMETERS = null;
+        IrisUtil.USED_IRIS_VIEWPORT = false;
         if (voxy$depthSampler != null) {
             voxy$depthSampler.destroy();
             voxy$depthSampler = null;

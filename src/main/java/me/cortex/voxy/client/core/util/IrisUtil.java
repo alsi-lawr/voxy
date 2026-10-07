@@ -71,6 +71,14 @@ public class IrisUtil {
     public static boolean irisShadersEnabledInConfig() {
         return IRIS_INSTALLED && irisShadersEnabledInConfig0();
     }
+    public static boolean dhAdapterUnavailable() {
+        if (!IRIS_INSTALLED || !me.cortex.voxy.client.iris.DhPrototype.activeEnvironment()) return false;
+        var pipeline = Iris.getPipelineManager().getPipelineNullable();
+        return !(pipeline instanceof me.cortex.voxy.client.iris.IGetIrisVoxyPipelineData data)
+                || data.voxy$getPipelineData() == null || data.voxy$getPipelineData().prototype == null
+                || !data.voxy$getPipelineData().prototype.ready();
+    }
+
     public static void disableIrisShaders() {
         if(IRIS_INSTALLED) disableIrisShaders0();
     }

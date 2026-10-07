@@ -41,6 +41,34 @@ public class VoxySamplers {
         };
     }
 
+    static SamplerHolder trackedSamplers(SamplerHolder samplers, java.util.Set<String> bound) {
+        return new SamplerHolder() {
+            private void record(String... names) {
+                for (String name : names) if (samplers.hasSampler(name)) bound.add(name);
+            }
+            public boolean hasSampler(String name) { return samplers.hasSampler(name); }
+            public void addExternalSampler(int unit, String... names) {
+                samplers.addExternalSampler(unit, names);
+                record(names);
+            }
+            public boolean addDefaultSampler(TextureType type, IntSupplier texture, ValueUpdateNotifier notifier, GlSampler sampler, String... names) {
+                boolean added = samplers.addDefaultSampler(type, texture, notifier, sampler, names);
+                if (added) record(names);
+                return added;
+            }
+            public boolean addDynamicSampler(TextureType type, IntSupplier texture, GlSampler sampler, String... names) {
+                boolean added = samplers.addDynamicSampler(type, texture, sampler, names);
+                if (added) record(names);
+                return added;
+            }
+            public boolean addDynamicSampler(TextureType type, IntSupplier texture, ValueUpdateNotifier notifier, GlSampler sampler, String... names) {
+                boolean added = samplers.addDynamicSampler(type, texture, notifier, sampler, names);
+                if (added) record(names);
+                return added;
+            }
+        };
+    }
+
     public static int prototypeDepth(IrisRenderingPipeline pipeline, boolean opaque) {
         var data = ((IGetIrisVoxyPipelineData)pipeline).voxy$getPipelineData();
         if (data == null || data.thePipeline == null) return 0;

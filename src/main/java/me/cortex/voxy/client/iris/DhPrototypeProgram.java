@@ -24,8 +24,10 @@ import java.util.Map;
 import static org.lwjgl.opengl.GL20.*;
 import static org.lwjgl.opengl.GL30.*;
 
-final class DhPrototypeProgram {
+final class DhPrototypeProgram implements DhPrototype.Program {
     private final int id;
+    private final me.cortex.voxy.client.core.gl.shader.Shader shader;
+    private boolean closed;
     private final ProgramUniforms uniforms;
     private final ProgramSamplers samplers;
     private final ProgramImages images;
@@ -39,8 +41,10 @@ final class DhPrototypeProgram {
     private final Map<String, Integer> locations = new LinkedHashMap<>();
     private final Map<String, Integer> samplerLocations = new LinkedHashMap<>();
 
-    DhPrototypeProgram(int id, ProgramSource source, IrisRenderingPipeline pipeline, CustomUniforms customUniforms, boolean waterPass, boolean shadowPass) {
-        this.id = id;
+    DhPrototypeProgram(me.cortex.voxy.client.core.gl.shader.Shader shader, ProgramSource source, IrisRenderingPipeline pipeline, CustomUniforms customUniforms, boolean waterPass, boolean shadowPass) {
+        this.shader = shader;
+        this.id = shader.id();
+        int id = this.id;
         this.source = source;
         this.customUniforms = customUniforms;
         var blends = new java.util.ArrayList<BufferBlendOverride>();
@@ -62,34 +66,47 @@ final class DhPrototypeProgram {
         for (var name : new String[]{"iris_NormalMatrix", "dhNearPlane", "dhFarPlane", "dhRenderDistance"}) locations.put(name, glGetUniformLocation(id, name));
         CommonUniforms.addDynamicUniforms(uniformBuilder, FogMode.PER_VERTEX);
         BuiltinReplacementUniforms.addBuiltinReplacementUniforms(uniformBuilder);
-        customUniforms.assignTo(uniformBuilder);
-        customUniforms.mapholderToPass(uniformBuilder, this);
-        uniforms = uniformBuilder.buildUniforms();
-        var samplerBuilder = ProgramSamplers.builder(id, ImmutableSet.of(0, 1, 2));
-        var imageBuilder = ProgramImages.builder(id);
-        // Water writes fbTranslucent: its original arbitrary-pixel DH reads must use completed opaque depth instead.
-        var passSamplers = VoxySamplers.waterDepthSamplers(samplerBuilder, () -> VoxySamplers.prototypeDepth(pipeline, waterPass));
-        pipeline.addGbufferOrShadowSamplers(passSamplers, imageBuilder, shadowPass ? pipeline::getFlippedBeforeShadow : waterPass ? pipeline::getFlippedAfterTranslucent : pipeline::getFlippedAfterPrepare, shadowPass, false, true, false);
-        samplers = samplerBuilder.build();
-        images = imageBuilder.build();
-        try (var stack = MemoryStack.stackPush()) {
-            var size = stack.mallocInt(1);
-            var type = stack.mallocInt(1);
-            int count = glGetProgrami(id, GL_ACTIVE_UNIFORMS);
-            for (int i = 0; i < count; i++) {
-                String name = glGetActiveUniform(id, i, size, type);
-                if (type.get(0) == GL_SAMPLER_2D || type.get(0) == GL_SAMPLER_2D_SHADOW) {
-                    for (int element = 0; element < size.get(0); element++) {
-                        String entry = size.get(0) == 1 ? name : name.replace("[0]", "[" + element + "]");
-                        samplerLocations.put(entry, glGetUniformLocation(id, entry));
+        try {
+            customUniforms.assignTo(uniformBuilder);
+            uniforms = uniformBuilder.buildUniforms();
+            var samplerBuilder = ProgramSamplers.builder(id, ImmutableSet.of(0, 1, 2));
+            var imageBuilder = ProgramImages.builder(id);
+            // Water writes fbTranslucent: its original arbitrary-pixel DH reads must use completed opaque depth instead.
+            var boundSamplers = new java.util.HashSet<String>();
+            var passSamplers = VoxySamplers.waterDepthSamplers(VoxySamplers.trackedSamplers(samplerBuilder, boundSamplers),
+                    () -> VoxySamplers.prototypeDepth(pipeline, waterPass));
+            pipeline.addGbufferOrShadowSamplers(passSamplers, imageBuilder, shadowPass ? pipeline::getFlippedBeforeShadow : waterPass ? pipeline::getFlippedAfterTranslucent : pipeline::getFlippedAfterPrepare, shadowPass, false, true, false);
+            samplers = samplerBuilder.build();
+            images = imageBuilder.build();
+            try (var stack = MemoryStack.stackPush()) {
+                var size = stack.mallocInt(1);
+                var type = stack.mallocInt(1);
+                int count = glGetProgrami(id, GL_ACTIVE_UNIFORMS);
+                for (int i = 0; i < count; i++) {
+                    String name = glGetActiveUniform(id, i, size, type);
+                    if (isSampler(type.get(0))) {
+                        if (size.get(0) > 1) throw new IllegalStateException("active sampler array has no per-element Iris binding: " + name);
+                        String baseName = name.endsWith("[0]") ? name.substring(0, name.length() - 3) : name;
+                        if (!boundSamplers.contains(name) && !boundSamplers.contains(baseName))
+                            throw new IllegalStateException("active sampler has no Iris resource binding: " + name);
+                        for (int element = 0; element < size.get(0); element++) {
+                            String entry = size.get(0) == 1 ? name : name.replace("[0]", "[" + element + "]");
+                            samplerLocations.put(entry, glGetUniformLocation(id, entry));
+                        }
                     }
                 }
             }
+            DhPrototype.write(source.getName() + "-bindings.txt", "uniformLocations=" + locations + "\nreservedVoxySamplers=[0,1,2]\n");
+            customUniforms.mapholderToPass(uniformBuilder, this);
+        } catch (RuntimeException failure) {
+            var mappings = ((me.cortex.voxy.client.mixin.iris.CustomUniformsAccessor)customUniforms).getLocationMap();
+            mappings.remove(uniformBuilder);
+            mappings.remove(this);
+            throw failure;
         }
-        DhPrototype.write(source.getName() + "-bindings.txt", "uniformLocations=" + locations + "\nreservedVoxySamplers=[0,1,2]\n");
     }
 
-    String resourceBindings() {
+    public String resourceBindings() {
         var receipt = new StringBuilder("program=" + id + "\nactiveProgram=" + glGetInteger(GL_CURRENT_PROGRAM)
                 + "\ndrawFramebuffer=" + glGetInteger(GL_DRAW_FRAMEBUFFER_BINDING)
                 + "\nwrittenDepth=" + glGetFramebufferAttachmentParameteri(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME)
@@ -116,7 +133,7 @@ final class DhPrototypeProgram {
         return receipt.toString();
     }
 
-    void bind(Viewport<?> viewport, DhFrameState state) {
+    public void bind(Viewport<?> viewport, DhFrameState state) {
         glUseProgram(id);
         samplers.update();
         uniforms.update();
@@ -137,6 +154,37 @@ final class DhPrototypeProgram {
         net.irisshaders.iris.gl.blending.BlendModeOverride.restore();
         source.getDirectives().getBlendModeOverride().ifPresent(override -> override.apply());
         for (var blend : bufferBlends) blend.apply();
+    }
+
+    private static boolean isSampler(int type) {
+        return switch (type) {
+            case GL_SAMPLER_1D, GL_SAMPLER_2D, GL_SAMPLER_3D, GL_SAMPLER_CUBE, GL_SAMPLER_1D_SHADOW, GL_SAMPLER_2D_SHADOW,
+                 GL_SAMPLER_1D_ARRAY, GL_SAMPLER_2D_ARRAY, GL_SAMPLER_1D_ARRAY_SHADOW, GL_SAMPLER_2D_ARRAY_SHADOW, GL_SAMPLER_CUBE_SHADOW,
+                 GL_INT_SAMPLER_1D, GL_INT_SAMPLER_2D, GL_INT_SAMPLER_3D, GL_INT_SAMPLER_CUBE, GL_INT_SAMPLER_1D_ARRAY, GL_INT_SAMPLER_2D_ARRAY,
+                 GL_UNSIGNED_INT_SAMPLER_1D, GL_UNSIGNED_INT_SAMPLER_2D, GL_UNSIGNED_INT_SAMPLER_3D, GL_UNSIGNED_INT_SAMPLER_CUBE,
+                 GL_UNSIGNED_INT_SAMPLER_1D_ARRAY, GL_UNSIGNED_INT_SAMPLER_2D_ARRAY,
+                 org.lwjgl.opengl.GL31.GL_SAMPLER_2D_RECT, org.lwjgl.opengl.GL31.GL_SAMPLER_2D_RECT_SHADOW,
+                 org.lwjgl.opengl.GL31.GL_SAMPLER_BUFFER, org.lwjgl.opengl.GL31.GL_INT_SAMPLER_2D_RECT,
+                 org.lwjgl.opengl.GL31.GL_INT_SAMPLER_BUFFER, org.lwjgl.opengl.GL31.GL_UNSIGNED_INT_SAMPLER_2D_RECT,
+                 org.lwjgl.opengl.GL31.GL_UNSIGNED_INT_SAMPLER_BUFFER,
+                 org.lwjgl.opengl.GL32.GL_SAMPLER_2D_MULTISAMPLE, org.lwjgl.opengl.GL32.GL_INT_SAMPLER_2D_MULTISAMPLE,
+                 org.lwjgl.opengl.GL32.GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE, org.lwjgl.opengl.GL32.GL_SAMPLER_2D_MULTISAMPLE_ARRAY,
+                 org.lwjgl.opengl.GL32.GL_INT_SAMPLER_2D_MULTISAMPLE_ARRAY, org.lwjgl.opengl.GL32.GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY,
+                 org.lwjgl.opengl.GL40.GL_SAMPLER_CUBE_MAP_ARRAY, org.lwjgl.opengl.GL40.GL_SAMPLER_CUBE_MAP_ARRAY_SHADOW,
+                 org.lwjgl.opengl.GL40.GL_INT_SAMPLER_CUBE_MAP_ARRAY, org.lwjgl.opengl.GL40.GL_UNSIGNED_INT_SAMPLER_CUBE_MAP_ARRAY -> true;
+            default -> false;
+        };
+    }
+
+    public int id() { return id; }
+
+    public void close() {
+        if (closed) return;
+        closed = true;
+        ProgramUniforms.clearActiveUniforms();
+        ProgramSamplers.clearActiveSamplers();
+        ((me.cortex.voxy.client.mixin.iris.CustomUniformsAccessor)customUniforms).getLocationMap().remove(this);
+        shader.free();
     }
 
     private void matrix(String name, Matrix4f matrix) {

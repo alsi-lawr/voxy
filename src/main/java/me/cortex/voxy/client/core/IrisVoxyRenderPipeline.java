@@ -95,7 +95,7 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
             throw new IllegalStateException();
         }
         this.data.thePipeline = null;
-        if (this.data.prototype != null) this.data.prototype.close();
+        if (this.data.prototype != null) this.data.prototype.detachRenderer();
 
         this.depthBlit.delete();
         this.fbTranslucent.free();

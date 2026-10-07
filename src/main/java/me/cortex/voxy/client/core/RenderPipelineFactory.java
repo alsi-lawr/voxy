@@ -13,6 +13,7 @@ import java.util.function.BooleanSupplier;
 public class RenderPipelineFactory {
     public static AbstractRenderPipeline createPipeline(RenderProperties properties, AsyncNodeManager nodeManager, NodeCleaner nodeCleaner, HierarchicalOcclusionTraverser traversal, BooleanSupplier frexSupplier) {
         //Note this is where will choose/create e.g. IrisRenderPipeline or normal pipeline
+        if (IrisUtil.dhAdapterUnavailable()) throw new IllegalStateException("VOXY_DH_ADAPTER_DISABLED: no validated Iris DH candidate");
         AbstractRenderPipeline pipeline = null;
         if (IrisUtil.IRIS_INSTALLED && IrisUtil.SHADER_SUPPORT) {
             pipeline = createIrisPipeline(properties, nodeManager, nodeCleaner, traversal, frexSupplier);

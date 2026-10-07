@@ -54,7 +54,6 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
     private static final int STATISTICS_BUFFER_BINDING = 8;
     private final Shader terrainShader;
     private final Shader translucentTerrainShader;
-    private final Shader shadowShader;
     private final Matrix4f shadowViewInverse = new Matrix4f();
 
     private final Shader commandGenShader;
@@ -110,16 +109,9 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
             .compile();
 
         if (prototype != null) {
-            var terrain = prototype.stages(false);
-            var water = prototype.stages(true);
-            long compileStart = System.nanoTime();
-            this.terrainShader = Shader.make().addSource(ShaderType.VERTEX, terrain.vertex()).addSource(ShaderType.FRAGMENT, terrain.fragment()).compile();
-            this.translucentTerrainShader = Shader.make().addSource(ShaderType.VERTEX, water.vertex()).addSource(ShaderType.FRAGMENT, water.fragment()).compile();
-            var shadow = prototype.shadowStages();
-            this.shadowShader = shadow == null ? null : Shader.make().addSource(ShaderType.VERTEX, shadow.vertex()).addSource(ShaderType.FRAGMENT, shadow.fragment()).compile();
-            prototype.attach(this.terrainShader.id(), this.translucentTerrainShader.id(), shadowShader == null ? 0 : shadowShader.id(), System.nanoTime() - compileStart);
+            this.terrainShader = null;
+            this.translucentTerrainShader = null;
         } else {
-            this.shadowShader = null;
             String vertex = ShaderLoader.parse("voxy:lod/gl46/quads3.vert");
             String taa = pipeline.taaFunction("taaShift");
             if (taa != null) {
@@ -211,7 +203,7 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         glDisable(GL_BLEND);
         glEnable(GL_DEPTH_TEST);
         glDepthFunc(this.properties.closerEqualDepthCompare());
-        this.terrainShader.bind();
+        if (this.terrainShader != null) this.terrainShader.bind();
         glBindVertexArray(GlVertexArray.STATIC_VAO);//Needs to be before binding
         if (this.pipeline instanceof me.cortex.voxy.client.core.IrisVoxyRenderPipeline iris && iris._getData().prototype != null) {
             this.bindRenderingBuffers(viewport);
@@ -265,7 +257,7 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         glDisable(GL_CULL_FACE);
         glEnable(GL_DEPTH_TEST);
         glDepthFunc(this.properties.closerEqualDepthCompare());
-        this.translucentTerrainShader.bind();
+        if (this.translucentTerrainShader != null) this.translucentTerrainShader.bind();
         glBindVertexArray(GlVertexArray.STATIC_VAO);//Needs to be before binding
         if (this.pipeline instanceof me.cortex.voxy.client.core.IrisVoxyRenderPipeline iris && iris._getData().prototype != null) {
             this.bindRenderingBuffers(viewport);
@@ -303,7 +295,6 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
             glDisable(GL_BLEND);
             glEnable(GL_DEPTH_TEST);
             glDepthFunc(properties.closerEqualDepthCompare());
-            shadowShader.bind();
             glBindVertexArray(GlVertexArray.STATIC_VAO);
             bindRenderingBuffers(mdic);
             if (water) pipeline.setupAndBindTranslucent(mdic); else pipeline.setupAndBindOpaque(mdic);
@@ -465,11 +456,10 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
 
     @Override
     public void free() {
-        if (shadowShader != null) shadowShader.free();
         this.uniform.free();
         this.distanceCountBuffer.free();
-        this.translucentTerrainShader.free();
-        this.terrainShader.free();
+        if (this.translucentTerrainShader != null) this.translucentTerrainShader.free();
+        if (this.terrainShader != null) this.terrainShader.free();
         this.commandGenShader.free();
         this.cullShader.free();
         this.prepShader.free();

@@ -79,6 +79,10 @@ public abstract class MixinLevelRenderer implements IVoxyRenderSystemHolder {
             Logger.info("Not creating renderer due to null instance");
             return;
         }
+        if (IrisUtil.dhAdapterUnavailable()) {
+            Logger.warn("VOXY_DH_ADAPTER_DISABLED: selected Iris DH candidate is unavailable; no normal Voxy fallback");
+            return;
+        }
         WorldEngine world = this.identifier.getOrCreateEngine(true);
         if (world == null) {
             Logger.warn("Not creating renderer due to null engine");

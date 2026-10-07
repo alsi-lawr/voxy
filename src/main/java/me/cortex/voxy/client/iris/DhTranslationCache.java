@@ -58,6 +58,8 @@ final class DhTranslationCache {
         return result.get();
     }
 
+    synchronized void clear() { results.clear(); }
+
     private static DhTranslationFailure failure(DhTranslationFailure.Code code, String pack, Key key, String detail, Throwable cause) {
         return new DhTranslationFailure(code, pack, key.dimension(), key.program(), detail, cause);
     }
