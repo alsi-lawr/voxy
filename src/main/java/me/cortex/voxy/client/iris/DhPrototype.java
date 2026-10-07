@@ -237,6 +237,7 @@ public final class DhPrototype {
                 + "\nsampler/attachment terrain=getFlippedAfterPrepare; water=getFlippedAfterTranslucent"
                 + "\nprepareFlips=" + pipeline.getFlippedAfterPrepare() + "\nafterTranslucentFlips=" + pipeline.getFlippedAfterTranslucent()
                 + "\nwaterDhDepthMeaning=completed opaque fb for dhDepthTex/0/1; pass-entry opaque snapshot (distinct from written depth)"
+                + "\ndeferredIrisDhDepthMeaning=dhDepthTex/0 opaque copy populated before Iris deferred; water not drawn yet"
                 + "\nlaterIrisDhDepthMeaning=dhDepthTex/0 final fbTranslucent; dhDepthTex1 opaque fb\n"
                 + (translucent ? waterProgram : opaqueProgram).resourceBindings() + targetInventory()
                 + "\nprojection=" + viewport.projection + "\nmodelView=" + viewport.modelView

@@ -151,7 +151,13 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
 
     @Override
     protected void postOpaquePreTranslucent(Viewport<?> viewport, int sourceDepthTexture) {
-        if (data.prototype != null) return;
+        if (data.prototype != null) {
+            me.cortex.voxy.client.core.util.GPUTiming.INSTANCE.marker("DH-depth-copy");
+            glBlitNamedFramebuffer(fb.framebuffer.id, fbTranslucent.framebuffer.id,
+                    0, 0, viewport.width, viewport.height, 0, 0, viewport.width, viewport.height,
+                    GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
+            return;
+        }
         if (this.shaderDepthHackFixTransformBlit != null) {
             this.fb.bind();
             glEnable(GL_DEPTH_TEST);
@@ -204,10 +210,6 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
 
 
     public void runDhWater(Viewport<?> viewport) {
-        me.cortex.voxy.client.core.util.GPUTiming.INSTANCE.marker("DH-depth-copy");
-        glBlitNamedFramebuffer(fb.framebuffer.id, fbTranslucent.framebuffer.id,
-                0, 0, viewport.width, viewport.height, 0, 0, viewport.width, viewport.height,
-                GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
         glDisable(GL_STENCIL_TEST);
         me.cortex.voxy.client.core.util.GPUTiming.INSTANCE.marker("DH-water");
         ((AbstractSectionRenderer)sectionRenderer).renderTranslucent(viewport);
