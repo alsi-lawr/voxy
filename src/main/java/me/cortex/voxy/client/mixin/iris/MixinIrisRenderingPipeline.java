@@ -38,7 +38,9 @@ public class MixinIrisRenderingPipeline implements IGetVoxyPatchData, IGetIrisVo
     private void voxy$requireAuthoredShadowTargets(ProgramSet programSet, CallbackInfo ci) {
         if (patchData != null && patchData.prototype != null && patchData.prototype.shadowEnabled()) {
             // Use Iris' own lazy target owner before it assembles shadow clears and its renderer.
-            ((IrisRenderingPipelineAccessor)(Object)this).getShadowTargetsSupplier().get();
+            var targets = ((IrisRenderingPipelineAccessor)(Object)this).getShadowTargetsSupplier().get();
+            targets.getOrCreate(0);
+            targets.getOrCreate(1);
         }
     }
 
