@@ -1,0 +1,94 @@
+name: Package Minecraft 1.20.1
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout build commit (release events use the tagged commit)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Install Java 17 compiler toolchain
+        id: java17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Java 21 Gradle host
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+
+      - name: Package remapped mod (no tests or benchmarks)
+        env:
+          JAVA17_HOME: ${{ steps.java17.outputs.path }}
+        # Loom discovers all source-set compilers, including tests and JMH.
+        run: ./gradlew --no-daemon remapJar -x compileTestJava -x compileJmhJava
+
+      - name: Select installable JAR and record download identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive_name=$(sed -n 's/^archives_base_name=//p' gradle.properties)
+          version=$(sed -n 's/^mod_version=//p' gradle.properties)
+          jar="${archive_name}-${version}.jar"
+          mkdir -p build/package
+          cp "build/libs/$jar" build/package/
+          (
+            cd build/package
+            sha256sum "$jar" > SHA256SUMS
+          )
+          {
+            printf 'repository=%s\n' "$GITHUB_REPOSITORY"
+            printf 'commit=%s\n' "$(git rev-parse HEAD)"
+            printf 'ref=%s\n' "$GITHUB_REF"
+            printf 'workflow_run=%s/%s/actions/runs/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+            printf 'run_attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
+            printf 'built_at_utc=%s\n' "$(date -u +%FT%TZ)"
+            printf 'jar=%s\n' "$jar"
+            printf 'minecraft=1.20.1\njava_target=17\ngradle_host=21\nbundled_platforms=linux-x86_64,windows-x86_64\n'
+          } > build/package/BUILD-INFO.txt
+
+      - name: Upload downloadable package
+        uses: actions/upload-artifact@v7
+        with:
+          name: voxy-mc1.20.1-java17-${{ github.sha }}
+          path: build/package/
+          if-no-files-found: error
+
+  # Attachment only: the single packaging job above never receives write access.
+  release-assets:
+    if: github.event_name == 'release'
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download this run's package
+        uses: actions/download-artifact@v8
+        with:
+          name: voxy-mc1.20.1-java17-${{ github.sha }}
+          path: package
+
+      - name: Attach assets to the already published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload --repo "$GITHUB_REPOSITORY" -- "$RELEASE_TAG" package/*
