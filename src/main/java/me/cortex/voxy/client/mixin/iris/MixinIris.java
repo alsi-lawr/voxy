@@ -12,6 +12,14 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 
 @Mixin(value = Iris.class, remap = false)
 public class MixinIris {
+    @org.spongepowered.asm.mixin.injection.Inject(method = "loadShaderpack", at = @At("HEAD"))
+    private static void voxy$clearDisabledDhRequest(org.spongepowered.asm.mixin.injection.callback.CallbackInfo ci) {
+        var config = Iris.getIrisConfig();
+        if (config != null && (!config.areShadersEnabled() || config.getShaderPackName().isEmpty())) {
+            me.cortex.voxy.client.iris.DhPrototype.clearRequest();
+        }
+    }
+
     @org.spongepowered.asm.mixin.injection.Inject(method = "destroyEverything", at = @At("RETURN"))
     private static void voxy$clearDhEnvironment(org.spongepowered.asm.mixin.injection.callback.CallbackInfo ci) {
         me.cortex.voxy.client.iris.DhPrototype.clearEnvironment();

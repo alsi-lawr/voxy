@@ -26,6 +26,7 @@ import java.util.TreeMap;
 public final class DhPrototype {
     private static final String MODE = System.getProperty("voxy.dhPrototype", "off");
     private static volatile boolean environmentActive;
+    private static volatile String selectedPack;
     private static Path output;
     private static DhShaderEnvironment loadedEnvironment;
     private final DhShaderEnvironment environment;
@@ -76,7 +77,13 @@ public final class DhPrototype {
 
     public static boolean requested() { return !MODE.equals("off"); }
     public static boolean activeEnvironment() { return environmentActive; }
+    public static boolean adapterSelected() { return selectedPack != null; }
     public static DhShaderEnvironment loadedEnvironment() { return loadedEnvironment; }
+
+    public static void clearRequest() {
+        selectedPack = null;
+        clearEnvironment();
+    }
 
     public static void clearEnvironment() {
         environmentActive = false;
@@ -88,20 +95,27 @@ public final class DhPrototype {
     public static void requireNoDh() {
         if (me.cortex.voxy.client.core.util.LodRenderOwnership.dhActive()) {
             throw new DhTranslationFailure(DhTranslationFailure.Code.LOD_ENGINE_CONFLICT,
-                    loadedEnvironment == null ? "loading" : loadedEnvironment.pack(), "loading", "adapter",
+                    loadedEnvironment == null ? java.util.Objects.requireNonNullElse(selectedPack, "loading") : loadedEnvironment.pack(), "preselection", "adapter",
                     "Distant Horizons rendering is active; select only one LOD renderer", null);
         }
     }
 
     public static ImmutableList<StringPair> environment(Path root, Map<String, String> options, ImmutableList<StringPair> environment) {
         clearEnvironment();
-        if (!requested()) return environment;
+        if (!requested()) {
+            clearRequest();
+            return environment;
+        }
         try (var paths = Files.walk(root)) {
-            if (paths.anyMatch(path -> path.getFileName().toString().equals("voxy.json") && Files.isRegularFile(path))) return environment;
+            if (paths.anyMatch(path -> path.getFileName().toString().equals("voxy.json") && Files.isRegularFile(path))) {
+                clearRequest();
+                return environment;
+            }
         } catch (IOException e) {
             throw new DhTranslationFailure(DhTranslationFailure.Code.RELOAD_FAILED, root.toUri().toString(), "loading", "native_metadata",
                     "cannot establish native metadata precedence", e);
         }
+        selectedPack = root.toUri().toString();
         requireNoDh();
         String outputPath = System.getProperty("voxy.dhPrototype.output");
         if (outputPath != null) output = Path.of(outputPath);

@@ -72,7 +72,7 @@ public class IrisUtil {
         return IRIS_INSTALLED && irisShadersEnabledInConfig0();
     }
     public static boolean dhAdapterUnavailable() {
-        if (!IRIS_INSTALLED || !me.cortex.voxy.client.iris.DhPrototype.activeEnvironment()) return false;
+        if (!IRIS_INSTALLED || !me.cortex.voxy.client.iris.DhPrototype.adapterSelected()) return false;
         var pipeline = Iris.getPipelineManager().getPipelineNullable();
         return !(pipeline instanceof me.cortex.voxy.client.iris.IGetIrisVoxyPipelineData data)
                 || data.voxy$getPipelineData() == null || data.voxy$getPipelineData().prototype == null
