@@ -383,6 +383,10 @@ public class HierarchicalOcclusionTraverser {
         return this.nodeBuffer;
     }
 
+    public void recordDhShadowTraversal(me.cortex.voxy.client.iris.DhPrototype prototype, Viewport<?> viewport, int sample) {
+        prototype.recordShadowTraversal(viewport, sample, topNodeCount, MAX_ITERATIONS, queueMetaBuffer, uniformBuffer);
+    }
+
     public void free() {
         if (this.traversal != null) this.traversal.free();
         this.requestBuffer.free();

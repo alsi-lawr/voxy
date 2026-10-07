@@ -243,6 +243,55 @@ public final class DhPrototype {
             try { Files.createDirectories(file.getParent()); Files.writeString(file, metadata + counts); }
             catch (IOException e) { throw new IllegalStateException("VOXY-005 shadow count receipt write failed", e); }
         });
+        owner.recordDhShadowTraversal(this, viewport, shadowCountReceipts - 1);
+    }
+
+    public void recordShadowTraversal(Viewport<?> viewport, int sample, int topNodes, int iterations,
+            me.cortex.voxy.client.core.gl.GlBuffer queues, me.cortex.voxy.client.core.gl.GlBuffer scene) {
+        Path file = output.resolve(receipt + "-shadow-traversal-" + sample + ".txt");
+        String metadata = "dimension=" + dimension + "\nframe=" + viewport.frameId + "\ncpuTopNodeCount=" + topNodes
+                + "\niterations=" + iterations + "\nsource=after shadow traversal and command generation; before MDI/next main upload\n";
+        String[] queueSnapshot = new String[1];
+        var downloads = me.cortex.voxy.client.core.rendering.util.DownloadStream.INSTANCE;
+        downloads.download(queues, 0, iterations * 16L, (ptr, size) -> {
+            var text = new StringBuilder(metadata);
+            for (int i = 0; i < iterations; i++) {
+                text.append("queue[").append(i).append("]=");
+                for (int j = 0; j < 4; j++) {
+                    if (j != 0) text.append(',');
+                    text.append(Integer.toUnsignedLong(org.lwjgl.system.MemoryUtil.memGetInt(ptr + i * 16L + j * 4L)));
+                }
+                text.append('\n');
+            }
+            queueSnapshot[0] = text.toString();
+        });
+        downloads.download(scene, 0, 208, (ptr, size) -> {
+            var text = new StringBuilder(queueSnapshot[0]).append("sceneMvpColumnMajor=");
+            for (int i = 0; i < 16; i++) {
+                if (i != 0) text.append(',');
+                text.append(org.lwjgl.system.MemoryUtil.memGetFloat(ptr + i * 4L));
+            }
+            text.append("\nsceneCameraSection=").append(org.lwjgl.system.MemoryUtil.memGetInt(ptr + 64)).append(',')
+                    .append(org.lwjgl.system.MemoryUtil.memGetInt(ptr + 68)).append(',').append(org.lwjgl.system.MemoryUtil.memGetInt(ptr + 72));
+            text.append("\nscenePackedHizSize=").append(Integer.toUnsignedLong(org.lwjgl.system.MemoryUtil.memGetInt(ptr + 76)));
+            text.append("\nsceneCameraSubSection=").append(org.lwjgl.system.MemoryUtil.memGetFloat(ptr + 80)).append(',')
+                    .append(org.lwjgl.system.MemoryUtil.memGetFloat(ptr + 84)).append(',').append(org.lwjgl.system.MemoryUtil.memGetFloat(ptr + 88));
+            text.append("\nsceneMinScreenArea=").append(org.lwjgl.system.MemoryUtil.memGetFloat(ptr + 92)).append('\n');
+            for (int i = 0; i < 6; i++) {
+                text.append("sceneFrustum[").append(i).append("]=");
+                for (int j = 0; j < 4; j++) {
+                    if (j != 0) text.append(',');
+                    text.append(org.lwjgl.system.MemoryUtil.memGetFloat(ptr + 96 + i * 16L + j * 4L));
+                }
+                text.append('\n');
+            }
+            text.append("sceneRenderQueueMax=").append(Integer.toUnsignedLong(org.lwjgl.system.MemoryUtil.memGetInt(ptr + 192)))
+                    .append("\nsceneVisibilityId=").append(Integer.toUnsignedLong(org.lwjgl.system.MemoryUtil.memGetInt(ptr + 196)))
+                    .append("\nsceneRequestQueueSize=").append(Integer.toUnsignedLong(org.lwjgl.system.MemoryUtil.memGetInt(ptr + 200)))
+                    .append("\nsceneRenderDistanceSquared=").append(org.lwjgl.system.MemoryUtil.memGetFloat(ptr + 204)).append('\n');
+            try { Files.createDirectories(file.getParent()); Files.writeString(file, text); }
+            catch (IOException e) { throw new IllegalStateException("VOXY-005 shadow traversal receipt write failed", e); }
+        });
     }
 
     public void recordSubmission(boolean translucent, Viewport<?> viewport) {

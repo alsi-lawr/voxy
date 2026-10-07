@@ -227,6 +227,10 @@ public abstract class AbstractRenderPipeline extends TrackedObject {
         } while (this.frexStillHasWork.getAsBoolean());
     }
 
+    public final void recordDhShadowTraversal(me.cortex.voxy.client.iris.DhPrototype prototype, Viewport<?> viewport, int sample) {
+        this.traversal.recordDhShadowTraversal(prototype, viewport, sample);
+    }
+
     @Override
     protected void free0() {
         this.scratchFramebuffer.free();

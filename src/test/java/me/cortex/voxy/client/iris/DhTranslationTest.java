@@ -65,6 +65,23 @@ public final class DhTranslationTest {
         state.reset();
         state.update(7, 1280, 720, 1024, 64, 0, first);
         require(state.previousProjection.equals(first) && state.resetReason.equals("renderer_owner"), "New dimension/renderer owner resets even a reused frame ID");
+        var unready = new org.joml.Matrix4f(first).m00(Float.NaN);
+        state.update(8, 1280, 720, 1024, 64, 0, unready);
+        require(!state.projection.isFinite(), "Upstream unready current projection is not replaced by a fallback");
+        state.update(9, 1280, 720, 1024, 64, 0, second);
+        require(state.historyReset && state.previousProjection.equals(second) && state.resetReason.equals("projection_unready"),
+                "First valid frame after an unready projection cannot inherit invalid history");
+        state.update(9, 1280, 720, 1024, 64, 0, first);
+        require(state.historyReset && state.projection.equals(second) && state.previousProjection.equals(second),
+                "Repeated pass cannot overwrite the recovered frame or advance its history");
+        state.update(10, 1280, 720, 1024, 64, 0, first);
+        require(!state.historyReset && state.previousProjection.equals(second), "Ordinary history resumes after recovery");
+        state.reset();
+        state.update(1, 1600, 900, 0, 64, 0, unready);
+        state.update(2, 1600, 900, 0, 64, 0, first);
+        require(state.historyReset && state.previousProjection.equals(first)
+                && state.projection.mul(state.inverseProjection, new org.joml.Matrix4f()).equals(new org.joml.Matrix4f(), .001f),
+                "Initial unready frame cannot poison the first valid current/inverse/previous tuple");
     }
 
     private static void selectedPreflight(Path scratch) throws Exception {

@@ -22,7 +22,8 @@ public final class DhFrameState {
     public void update(int frame, int width, int height, double x, double y, double z, Matrix4fc projection) {
         if (this.frame == frame) return;
         double dx = x - this.x, dy = y - this.y, dz = z - this.z;
-        resetReason = this.frame < 0 ? resetReason : frame != this.frame + 1 ? "frame_gap"
+        resetReason = this.frame < 0 ? resetReason : !this.projection.isFinite() ? "projection_unready"
+                : frame != this.frame + 1 ? "frame_gap"
                 : width != this.width || height != this.height ? "resize"
                 : dx * dx + dy * dy + dz * dz > 64 * 64 ? "camera_discontinuity" : "none";
         boolean reset = !resetReason.equals("none");
