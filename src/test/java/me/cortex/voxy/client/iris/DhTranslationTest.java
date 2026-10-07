@@ -8,6 +8,7 @@ import net.irisshaders.iris.shaderpack.include.IncludeGraph;
 import net.irisshaders.iris.shaderpack.include.IncludeProcessor;
 import net.irisshaders.iris.shaderpack.option.ShaderPackOptions;
 import net.irisshaders.iris.shaderpack.preprocessor.JcppProcessor;
+import net.irisshaders.iris.shaderpack.programs.ProgramSource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -21,16 +22,115 @@ public final class DhTranslationTest {
         cacheIdentityAndIsolation();
         failureReuse();
         faceInputs();
-        if (args.length != 0) {
-            Path output = Path.of(args[0]);
-            Files.createDirectories(output);
+        Path scratch = Files.createTempDirectory(Path.of("build"), "dh-translation-test-");
+        try {
             var config = net.irisshaders.iris.Iris.class.getDeclaredField("irisConfig");
             config.setAccessible(true);
-            config.set(null, new net.irisshaders.iris.config.IrisConfig(output.resolve("unused-iris.properties")));
-            translateFixtures(output);
-            if (args.length > 1) translateCorpus(Path.of(args[1]), output.resolve("corpus"));
+            config.set(null, new net.irisshaders.iris.config.IrisConfig(scratch.resolve("unused-iris.properties")));
+            selectedPreflight(scratch);
+            diagnosticOrigins(scratch);
+            if (args.length != 0) {
+                Path output = Path.of(args[0]);
+                Files.createDirectories(output);
+                translateFixtures(output);
+                if (args.length > 1) translateCorpus(Path.of(args[1]), output.resolve("corpus"));
+            }
+        } finally {
+            try (var paths = Files.walk(scratch)) {
+                for (var path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) Files.delete(path);
+            }
         }
-        System.out.println("DH immutable cache reuse, identity invalidation, failure isolation and unsigned face input checks passed.");
+        System.out.println("DH selected preflight, provider-origin failure reuse, immutable cache identity/isolation and unsigned face input checks passed.");
+    }
+
+    private static void selectedPreflight(Path scratch) throws Exception {
+        Path root = Files.createDirectory(scratch.resolve("preflight"));
+        var fixture = DhPrototypeFixtures.stages("identity");
+        Files.writeString(root.resolve("dh_terrain.vsh"), fixture.vertex());
+        var environment = DhShaderEnvironment.snapshot(root, Map.of(), List.of());
+        var terrain = program("dh_terrain", fixture);
+        var water = program("dh_water", fixture);
+        var prototype = new DhPrototype(terrain, water, environment, "/world0");
+        var textures = new Object2ObjectOpenHashMap<net.irisshaders.iris.helpers.Tri<String, net.irisshaders.iris.gl.texture.TextureType,
+                net.irisshaders.iris.shaderpack.texture.TextureStage>, String>();
+        textures.put(new net.irisshaders.iris.helpers.Tri<>("probeSampler", net.irisshaders.iris.gl.texture.TextureType.TEXTURE_2D,
+                net.irisshaders.iris.shaderpack.texture.TextureStage.GBUFFERS_AND_SHADOW), "mappedSampler");
+        prototype.prepareStages(textures);
+        var opaque = prototype.stages(false);
+        var translucent = prototype.stages(true);
+        for (var source : List.of(terrain, water)) {
+            var key = new DhTranslationCache.Key(environment.identity(), "/world0", source.getName(), DhTranslationCache.Source.from(source), textures);
+            var cached = environment.translations().get(key, () -> { throw new AssertionError("Preflight must cache both selected sources"); });
+            var stages = source == terrain ? opaque : translucent;
+            require(stages.vertex() == cached.vertex() && stages.fragment() == cached.fragment(), "Renderer must consume the preflight artifact");
+        }
+        textures.clear();
+        require(prototype.stages(false) == opaque && prototype.stages(true) == translucent,
+                "Renderer construction must not re-key against later texture-map changes");
+        var rejectedWater = program("dh_water", unsupportedInput(fixture));
+        var rejected = new DhPrototype(terrain, rejectedWater, environment, "/world0");
+        DhTranslationFailure first = null;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try { rejected.prepareStages(Map.of()); throw new AssertionError("Unsupported selected water escaped preflight"); }
+            catch (DhTranslationFailure failure) {
+                require(failure.code() == DhTranslationFailure.Code.UNSUPPORTED_VERTEX_INPUT && failure.program().equals("dh_water")
+                        && failure.dimension().equals("/world0"), "Water rejection must retain selected context");
+                if (first == null) first = failure;
+                else require(first == failure, "Repeated preflight must reuse its owned failure");
+            }
+        }
+        System.out.println("Both selected sources cached before renderer access; unsupported water rejects during preflight and reuses the same failure.");
+    }
+
+    private static void diagnosticOrigins(Path scratch) throws Exception {
+        Path directory = Files.createDirectories(scratch.resolve("directory/nested/shaders"));
+        var fixture = unsupportedInput(DhPrototypeFixtures.stages("identity"));
+        Files.writeString(directory.resolve("dh_terrain.vsh"), fixture.vertex());
+        var archives = new ArrayList<java.nio.file.FileSystem>();
+        try {
+            var roots = new ArrayList<Path>();
+            for (var name : List.of("first.zip", "second.zip")) {
+                var archive = java.nio.file.FileSystems.newFileSystem(java.net.URI.create("jar:" + scratch.resolve(name).toUri()), Map.of("create", "true"));
+                archives.add(archive);
+                Path root = Files.createDirectories(archive.getPath("nested/shaders"));
+                Files.writeString(root.resolve("dh_terrain.vsh"), fixture.vertex());
+                roots.add(root);
+            }
+            roots.add(directory);
+            String identity = null;
+            for (var root : roots) {
+                var environment = DhShaderEnvironment.snapshot(root, Map.of(), List.of());
+                if (identity == null) identity = environment.identity();
+                else require(identity.equals(environment.identity()), "Identical content must exercise separate owners with the same source identity");
+                var prototype = new DhPrototype(program("dh_terrain", fixture), program("dh_water", DhPrototypeFixtures.stages("identity")), environment, "/world-1");
+                DhTranslationFailure first = null;
+                for (int attempt = 0; attempt < 2; attempt++) {
+                    try { prototype.prepareStages(Map.of()); throw new AssertionError("Unsupported terrain escaped origin diagnostic"); }
+                    catch (DhTranslationFailure failure) {
+                        Path reported = Path.of(java.net.URI.create(failure.pack()));
+                        require(reported.getFileSystem() == root.getFileSystem() && Files.isSameFile(reported, root)
+                                && Files.readString(reported.resolve("dh_terrain.vsh")).equals(fixture.vertex()),
+                                "Diagnostic must resolve to its own actual pack/provider and inner shader root");
+                        require(failure.code() == DhTranslationFailure.Code.UNSUPPORTED_VERTEX_INPUT && failure.program().equals("dh_terrain")
+                                && failure.dimension().equals("/world-1"), "Origin diagnostics must retain selected rejection context");
+                        if (first == null) first = failure;
+                        else require(first == failure, "Failure cache must retain each pack's origin independently");
+                    }
+                }
+                System.out.println("Resolved owned cached rejection: " + first.getMessage());
+            }
+        } finally {
+            for (var archive : archives) archive.close();
+        }
+    }
+
+    private static ProgramSource program(String name, DhPrototypeTransform.Stages stages) {
+        return new ProgramSource(name, stages.vertex(), null, null, null, stages.fragment(), null, null, null);
+    }
+
+    private static DhPrototypeTransform.Stages unsupportedInput(DhPrototypeTransform.Stages fixture) {
+        return new DhPrototypeTransform.Stages(fixture.vertex().replace("void main()", "attribute vec3 unsupported;\nvoid main()")
+                .replace("probeNormal = gl_Normal", "probeNormal = unsupported"), fixture.fragment());
     }
 
     private static void cacheIdentityAndIsolation() {

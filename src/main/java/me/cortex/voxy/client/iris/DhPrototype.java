@@ -5,10 +5,13 @@ import me.cortex.voxy.client.core.IrisVoxyRenderPipeline;
 import me.cortex.voxy.client.core.rendering.Viewport;
 import net.fabricmc.loader.api.FabricLoader;
 import net.irisshaders.iris.helpers.StringPair;
+import net.irisshaders.iris.helpers.Tri;
+import net.irisshaders.iris.gl.texture.TextureType;
 import net.irisshaders.iris.pipeline.IrisRenderingPipeline;
 import net.irisshaders.iris.shaderpack.loading.ProgramId;
 import net.irisshaders.iris.shaderpack.programs.ProgramSet;
 import net.irisshaders.iris.shaderpack.programs.ProgramSource;
+import net.irisshaders.iris.shaderpack.texture.TextureStage;
 import net.irisshaders.iris.uniforms.custom.CustomUniforms;
 import me.cortex.voxy.client.mixin.iris.IrisRenderingPipelineAccessor;
 
@@ -36,9 +39,11 @@ public final class DhPrototype {
     private DhPrototypeProgram opaqueProgram;
     private DhPrototypeProgram waterProgram;
     private String receipt;
+    private Stages terrainStages;
+    private Stages waterStages;
     private final boolean[] submitted = new boolean[2];
 
-    private DhPrototype(ProgramSource terrain, ProgramSource water, DhShaderEnvironment environment, String dimension) {
+    DhPrototype(ProgramSource terrain, ProgramSource water, DhShaderEnvironment environment, String dimension) {
         this.environment = environment;
         this.dimension = dimension;
         this.terrain = terrain;
@@ -73,7 +78,7 @@ public final class DhPrototype {
         try {
             loadedEnvironment = DhShaderEnvironment.snapshot(root, options, result);
             if (output != null) {
-                StringBuilder manifest = new StringBuilder("mode=" + MODE + "\nroot=" + root + "\noptions=" + new TreeMap<>(options) + "\n");
+                StringBuilder manifest = new StringBuilder("mode=" + MODE + "\nroot=" + loadedEnvironment.pack() + "\noptions=" + new TreeMap<>(options) + "\n");
                 result.forEach(pair -> manifest.append("define=").append(pair.key()).append('=').append(pair.value()).append('\n'));
                 try (var paths = Files.walk(root)) {
                     for (var path : paths.filter(Files::isRegularFile).sorted().toList()) {
@@ -130,11 +135,22 @@ public final class DhPrototype {
 
     public record Stages(String vertex, String fragment) {}
     public Stages stages(boolean translucent) {
-        ProgramSource source = translucent ? water : terrain;
+        return java.util.Objects.requireNonNull(translucent ? waterStages : terrainStages,
+                "Selected DH sources must be lowered during Iris pipeline load");
+    }
+
+    void prepareStages(Map<Tri<String, TextureType, TextureStage>, String> textures) {
+        var terrain = translate(this.terrain, textures);
+        var water = translate(this.water, textures);
+        this.terrainStages = terrain;
+        this.waterStages = water;
+    }
+
+    private Stages translate(ProgramSource source, Map<Tri<String, TextureType, TextureStage>, String> textures) {
         if (!MODE.equals("pack")) source = DhPrototypeFixtures.source(MODE, source);
         long start = System.nanoTime();
         var key = new DhTranslationCache.Key(environment.identity(), dimension, source.getName(),
-                DhTranslationCache.Source.from(source), pipeline.getTextureMap());
+                DhTranslationCache.Source.from(source), textures);
         var stages = environment.translations().translate(environment.pack(), key);
         long transformNanos = System.nanoTime() - start;
         write(receipt + "-" + source.getName() + "-transform.txt", "environmentIdentity=" + environment.identity() + "\ndimension=" + dimension + "\nloadTimeTransformOrCacheLookupNanos=" + transformNanos + "\nvertexSha256="

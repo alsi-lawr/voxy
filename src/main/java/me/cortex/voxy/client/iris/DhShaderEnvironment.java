@@ -28,7 +28,7 @@ public final class DhShaderEnvironment {
                 sourceHashes.put(root.relativize(path).toString(), DhPrototype.hash(Files.readAllBytes(path)));
             }
         }
-        return new DhShaderEnvironment(root.toString(), identity(sourceHashes, options, defines, contract()));
+        return new DhShaderEnvironment(root.toUri().toString(), identity(sourceHashes, options, defines, contract()));
     }
 
     static String identity(Map<String, String> sourceHashes, Map<String, String> options, List<StringPair> defines, String contract) {

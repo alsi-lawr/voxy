@@ -103,7 +103,10 @@ public class IrisVoxyRenderPipelineData {
 
     public static IrisVoxyRenderPipelineData buildPipeline(IrisRenderingPipeline ipipe, IrisShaderPatch patch, CustomUniforms cu, ShaderStorageBufferHolder ssboHolder) {
         var uniforms = patch.prototype == null ? createUniformLayoutStructAndUpdater(createUniformSet(cu, patch)) : null;
-        if (patch.prototype != null) patch.prototype.bindPipeline(ipipe, cu);
+        if (patch.prototype != null) {
+            patch.prototype.bindPipeline(ipipe, cu);
+            patch.prototype.prepareStages(ipipe.getTextureMap());
+        }
 
 
         var imageSet = patch.prototype == null ? createImageSet(ipipe, patch) : null;
