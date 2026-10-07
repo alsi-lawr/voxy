@@ -283,6 +283,10 @@ public class VoxyRenderSystem {
         TimingStatistics.resetSamplers();
 
         TimingStatistics.all.start();
+        if (me.cortex.voxy.client.core.util.PerformanceCapture.ENABLED) {
+            GPUTiming.INSTANCE.setCaptureContext(me.cortex.voxy.client.core.util.PerformanceCapture.currentFrame(),
+                    (IrisUtil.irisShadowActive() ? 2 : 0) | (water ? 1 : 0));
+        }
         GPUTiming.INSTANCE.marker();//Start marker
         TimingStatistics.main.start();
 
@@ -411,6 +415,10 @@ public class VoxyRenderSystem {
         }
 
         TimingStatistics.all.stop();
+        if (me.cortex.voxy.client.core.util.PerformanceCapture.ENABLED) {
+            me.cortex.voxy.client.core.util.PerformanceCapture.voxyPass(
+                    (IrisUtil.irisShadowActive() ? 2 : 0) | (water ? 1 : 0), TimingStatistics.all.getRuntimeNanos());
+        }
 
         //TimingStatistics.I.start();
         //glFlush();

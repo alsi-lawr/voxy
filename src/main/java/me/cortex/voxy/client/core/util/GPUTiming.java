@@ -19,20 +19,68 @@ public class GPUTiming {
 
     private final GlTimestampQuerySet<String> timingSet = new GlTimestampQuerySet(String.class);
 
+    private final GlTimestampQuerySet<String> clientTimingSet = PerformanceCapture.ENABLED ? new GlTimestampQuerySet<>(String.class) : null;
+
     private float[] timings = new float[0];
     private String[] lables = new String[0];
 
-    private boolean enabled = false;
+    private boolean enabled = PerformanceCapture.ENABLED;
+    private long captureFrame = -1;
+    private int capturePass;
+    private boolean clientFrameCaptured;
+    private boolean capturePassAccepted;
     private final String prototypeTimingOutput = System.getProperty("voxy.dhPrototype.timingOutput");
     private StringBuilder prototypeTimings = prototypeTimingOutput == null ? null : new StringBuilder("sample,cpuReceiptNanos,interval,label,gpuDeltaNanos\n");
     private int prototypeTimingSamples;
+
+    public void beginClientFrame() {
+        if (!PerformanceCapture.recording()) return;
+        clientFrameCaptured = clientTimingSet.INFLIGHT.size() < 64;
+        if (clientFrameCaptured) clientTimingSet.capture(null);
+        else PerformanceCapture.skipClientGpuFrame();
+    }
+
+    public void endClientFrame() {
+        if (!PerformanceCapture.ENABLED) return;
+        if (clientFrameCaptured) {
+            clientFrameCaptured = false;
+            clientTimingSet.capture(null);
+            clientTimingSet.download(PerformanceCapture.currentFrame(), 4,
+                    (frame, pass, labels, data) -> PerformanceCapture.gpuIntervals(frame, pass, data));
+        }
+        clientTimingSet.tick();
+    }
+
+    public void finishCapture() {
+        try {
+            PerformanceCapture.finish(clientTimingSet.INFLIGHT.size(), timingSet.INFLIGHT.size());
+        } finally {
+            freeClientCapture();
+            this.free();
+        }
+    }
+
+    private void freeClientCapture() {
+        if (clientTimingSet != null) {
+            for (int i = 0; i < clientTimingSet.index; i++) glDeleteQueries(clientTimingSet.queries[i]);
+            clientTimingSet.free();
+        }
+    }
+
+    public void setCaptureContext(long frame, int pass) {
+        if (!PerformanceCapture.ENABLED) return;
+        captureFrame = frame;
+        capturePass = pass;
+        capturePassAccepted = timingSet.INFLIGHT.size() < 64;
+        if (!capturePassAccepted && PerformanceCapture.recording()) PerformanceCapture.skipVoxyGpuPass();
+    }
 
     public void marker() {
         this.marker(null);
     }
 
     public void marker(String lable) {
-        if (this.enabled) {
+        if (this.enabled && (!PerformanceCapture.ENABLED || (PerformanceCapture.recording() && capturePassAccepted))) {
             this.timingSet.capture(lable);
         }
     }
@@ -63,7 +111,8 @@ public class GPUTiming {
     }
 
     public void tick() {
-        this.timingSet.download((meta,data)->{
+        this.timingSet.download(captureFrame, capturePass, (frame,pass,meta,data)->{
+            PerformanceCapture.gpuIntervals(frame, pass, data);
             this.recordPrototypeTiming(meta, data);
             long current = data[0];
 
@@ -113,11 +162,11 @@ public class GPUTiming {
     }
 
     public interface TimingDataConsumer <T> {
-        void accept(T metadata, long[] timings);
+        void accept(long frame, int pass, T metadata, long[] timings);
     }
     private static final class GlTimestampQuerySet <T> extends TrackedObject {
 
-        private record InflightRequest<T>(int[] queries, T[] meta, TimingDataConsumer<T[]> callback) {
+        private record InflightRequest<T>(long frame, int pass, int[] queries, T[] meta, TimingDataConsumer<T[]> callback) {
             private boolean callbackIfReady(IntArrayFIFOQueue queryPool) {
                 boolean ready = glGetQueryObjecti(this.queries[this.queries.length-1], GL_QUERY_RESULT_AVAILABLE) == GL_TRUE;
                 if (!ready) {
@@ -128,7 +177,7 @@ public class GPUTiming {
                     results[i] = glGetQueryObjecti64(this.queries[i], GL_QUERY_RESULT);
                     queryPool.enqueue(this.queries[i]);
                 }
-                this.callback.accept(this.meta, results);
+                this.callback.accept(this.frame, this.pass, this.meta, results);
                 return true;
             }
         }
@@ -156,13 +205,13 @@ public class GPUTiming {
 
         }
 
-        public void download(TimingDataConsumer<T[]> consumer) {
+        public void download(long frame, int pass, TimingDataConsumer<T[]> consumer) {
             if (this.index != 0) {
                 var queries = Arrays.copyOf(this.queries, this.index);
                 var metadata = Arrays.copyOf(this.metadata, this.index);
                 Arrays.fill(this.metadata, null);
                 this.index = 0;
-                this.INFLIGHT.enqueue(new InflightRequest(queries, metadata, consumer));
+                this.INFLIGHT.enqueue(new InflightRequest(frame, pass, queries, metadata, consumer));
             }
         }
 

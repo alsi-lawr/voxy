@@ -48,6 +48,8 @@ public class TimingStatistics {
             this.rolling = Math.max(this.rolling * ROLLING_WEIGHT + time * (1-ROLLING_WEIGHT), time);
         }
 
+        public long getRuntimeNanos() { return this.runtime; }
+
         public double getRolling() {
             return this.rolling;
         }

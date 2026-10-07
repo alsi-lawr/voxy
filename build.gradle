@@ -132,6 +132,8 @@ jmh {
     jvmArgsAppend = ['--add-modules=jdk.incubator.vector']
 }
 
+tasks.named('jmhRunBytecodeGenerator') { runtimeClasspath.from(sourceSets.main.compileClasspath) }
+
 // Unlike game integration tests, these fixed-mask checks need neither Minecraft nor GL.
 tasks.register('bitPackingTest', JavaExec) {
     dependsOn testClasses
@@ -240,3 +242,11 @@ tasks.register('dhLifecycleMissingPack', Zip) {
     destinationDirectory = layout.buildDirectory.dir('dh-lifecycle-fixtures')
     archiveFileName = 'voxy-006-missing-failure.zip'
 }
+
+tasks.register('performanceCaptureTest', JavaExec) {
+    dependsOn testClasses
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'me.cortex.voxy.client.core.util.PerformanceCaptureTest'
+}
+tasks.named('check') { dependsOn 'performanceCaptureTest' }
