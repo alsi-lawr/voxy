@@ -23,14 +23,13 @@ import java.util.function.Function;
 public class MixinProgramSet implements IGetVoxyPatchData {
     @Shadow @Final private PackDirectives packDirectives;
     @Unique IrisShaderPatch patchData;
+    @Unique private boolean voxy$prototypeEligible;
 
     @Inject(method = "<init>", at = @At(value = "INVOKE", target = "Lnet/irisshaders/iris/shaderpack/programs/ProgramSet;locateDirectives()V", shift = At.Shift.BEFORE))
     private void voxy$injectPatchMaker(AbsolutePackPath directory, Function<AbsolutePackPath, String> sourceProvider, ShaderProperties shaderProperties, ShaderPack pack, CallbackInfo ci) {
         if (VoxyConfig.CONFIG.isRenderingEnabled() && IrisUtil.SHADER_SUPPORT) {
             this.patchData = IrisShaderPatch.makePatch(pack, directory, sourceProvider);
-            if (this.patchData == null && sourceProvider.apply(directory.resolve("voxy.json")) == null) {
-                this.patchData = IrisShaderPatch.makePrototype((ProgramSet)(Object)this);
-            }
+            this.voxy$prototypeEligible = this.patchData == null && sourceProvider.apply(directory.resolve("voxy.json")) == null;
         }
         /*
         if (this.patchData != null) {
@@ -49,6 +48,10 @@ public class MixinProgramSet implements IGetVoxyPatchData {
 
     @Override
     public IrisShaderPatch voxy$getPatchData() {
+        // Iris constructs an unused base before selecting a dimension override for the pipeline.
+        if (this.patchData == null && this.voxy$prototypeEligible) {
+            this.patchData = IrisShaderPatch.makePrototype((ProgramSet)(Object)this);
+        }
         return this.patchData;
     }
 }
